@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+body {
+  /* 은은한 종이 질감: 미세 도트 + 상단에서 내려오는 빛 */
+  background:
+    radial-gradient(circle at 1px 1px, #22302A0A 1px, transparent 0) 0 0 / 22px 22px,
+    linear-gradient(180deg, #F7F9F3 0%, #F4F6F1 40%, #F0F3EC 100%);
+  color: #22302A;
+  font-family: 'IBM Plex Sans KR', sans-serif;
+  min-height: 100vh;
+}
+
+/* 카드에 종이 두께감 */
+section, .paper-card {
+  box-shadow: 0 1px 2px #22302A0D, 0 4px 14px #22302A08;
+}
+
+/* 형광펜 스와이프 */
+.hl-swipe {
+  background-image: linear-gradient(120deg, #F5D54766 0%, #F5D547AA 100%);
+  background-repeat: no-repeat;
+  background-size: 0% 62%;
+  background-position: 0 68%;
+  transition: background-size .45s cubic-bezier(.25, .8, .3, 1);
+  border-radius: 2px;
+}
+.hl-swipe.on { background-size: 100% 62%; }
+
+/* 기분 버튼 */
+.mood-btn { transition: transform .15s ease, filter .2s ease; }
+.mood-btn:hover { transform: scale(1.15); }
+.mood-btn.on { transform: scale(1.1); box-shadow: 0 2px 6px #2F6B4F33; }
+
+/* 참 잘했어요 도장 */
+.stamp {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  width: 84px;
+  height: 84px;
+  border: 3px solid #C0392B;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #C0392B;
+  font-family: 'Gowun Batang', serif;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: center;
+  transform: rotate(-14deg);
+  opacity: .85;
+  pointer-events: none;
+  z-index: 10;
+  animation: stamp-in .45s cubic-bezier(.2, 1.6, .4, 1) both;
+  /* 잉크 번짐 느낌 */
+  box-shadow: inset 0 0 0 1.5px #C0392B44;
+  mask-image: radial-gradient(circle at 30% 40%, black 96%, transparent 100%);
+}
+.stamp span { padding: 6px; word-break: keep-all; }
+
+@keyframes stamp-in {
+  0% { transform: rotate(-14deg) scale(2.2); opacity: 0; }
+  100% { transform: rotate(-14deg) scale(1); opacity: .85; }
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid #2F6B4F55;
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hl-swipe, .mood-btn { transition: none; }
+  .stamp { animation: none; }
+  * { transition-duration: 0s !important; }
+}

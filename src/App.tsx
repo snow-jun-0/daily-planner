@@ -4,6 +4,7 @@ import MonthView from "./views/MonthView";
 import DayView from "./views/DayView";
 import SettingsModal from "./views/SettingsModal";
 import RecurringModal from "./views/RecurringModal";
+import TodosModal from "./views/TodosModal";
 import { P, downloadICS } from "./lib";
 
 type View = "year" | "month" | "day";
@@ -13,10 +14,18 @@ export default function App() {
   const [view, setView] = useState<View>("day");
   const [showSettings, setShowSettings] = useState(false);
   const [showRecurring, setShowRecurring] = useState(false);
+  const [showTodos, setShowTodos] = useState(false);
   const [recurringVersion, setRecurringVersion] = useState(0);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [day, setDay] = useState(today.getDate());
+
+  const gotoDate = (y: number, m: number, d: number) => {
+    setYear(y);
+    setMonth(m);
+    setDay(d);
+    setView("day");
+  };
 
   const goToday = () => {
     const t = new Date();
@@ -46,6 +55,12 @@ export default function App() {
               title="매주 반복되는 고정 일정 관리">
               ↻ 반복 일정
             </button>
+            <button onClick={() => setShowTodos(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ color: P.green, border: `1px solid ${P.green}` }}
+              title="모든 날짜의 완료하지 않은 할 일 모아보기">
+              전체 할 일
+            </button>
             <button onClick={downloadICS}
               className="text-xs px-3 py-1.5 rounded-lg font-medium"
               style={{ color: P.faint, border: `1px solid ${P.line}` }}
@@ -67,6 +82,9 @@ export default function App() {
             onClose={() => setShowRecurring(false)}
             onChanged={() => setRecurringVersion((v) => v + 1)}
           />
+        )}
+        {showTodos && (
+          <TodosModal onClose={() => setShowTodos(false)} onSelectDate={gotoDate} />
         )}
 
         {view === "year" && (

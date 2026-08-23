@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { P, HOURS, DAY_NAMES, RecurringBlock, uid, loadRecurring, saveRecurring } from "../lib";
+import {
+  P, DAY_NAMES, RecurringBlock, uid, loadRecurring, saveRecurring,
+  MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel,
+} from "../lib";
 
 interface Props {
   onClose: () => void;
@@ -12,8 +15,8 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
   const [list, setList] = useState<RecurringBlock[]>(() => loadRecurring());
   const [title, setTitle] = useState("");
   const [days, setDays] = useState<number[]>([1]); // 기본 월요일
-  const [start, setStart] = useState(9);
-  const [end, setEnd] = useState(11);
+  const [start, setStart] = useState(540); // 09:00
+  const [end, setEnd] = useState(660); // 11:00
   const [color, setColor] = useState(COLORS[0]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -26,6 +29,12 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
 
   const toggleDay = (d: number) =>
     setDays((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d].sort()));
+
+  const endOptions = MINUTE_OPTIONS.filter((m) => m > start);
+  const onStartChange = (v: number) => {
+    setStart(v);
+    setEnd((prevEnd) => (prevEnd <= v ? v + 10 : prevEnd));
+  };
 
   const add = () => {
     if (!title.trim() || days.length === 0 || end <= start) return;
@@ -101,12 +110,12 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
           </div>
 
           <div className="flex items-center gap-2 mb-3">
-            <select value={start} onChange={(e) => setStart(+e.target.value)} className="flex-1 px-2 py-2 rounded-lg text-sm" style={inputStyle}>
-              {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}시</option>)}
+            <select value={start} onChange={(e) => onStartChange(+e.target.value)} className="flex-1 px-2 py-2 rounded-lg text-sm" style={inputStyle}>
+              {START_MINUTE_OPTIONS.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
             </select>
             <span className="text-sm" style={{ color: P.faint }}>→</span>
             <select value={end} onChange={(e) => setEnd(+e.target.value)} className="flex-1 px-2 py-2 rounded-lg text-sm" style={inputStyle}>
-              {HOURS.map((h) => <option key={h + 1} value={h + 1}>{String(h + 1).padStart(2, "0")}시</option>)}
+              {endOptions.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
             </select>
           </div>
 
@@ -156,7 +165,7 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
                 <div className="flex-1">
                   <p className="text-sm font-semibold">{r.title}</p>
                   <p className="text-xs" style={{ color: P.faint }}>
-                    매주 {r.days.map((d) => DAY_NAMES[d]).join("·")} · {String(r.start).padStart(2, "0")}:00–{String(r.end).padStart(2, "0")}:00
+                    매주 {r.days.map((d) => DAY_NAMES[d]).join("·")} · {minutesToLabel(r.start)}–{minutesToLabel(r.end)}
                     {formatRange(r) && ` · ${formatRange(r)}`}
                   </p>
                 </div>

@@ -412,7 +412,15 @@ export default function DayView({
                   {/* 구글 캘린더 일정 (앱이 이 시간표에서 내보낸 이벤트는 중복 표시하지 않음)
                       앱 블록과 겹치지 않으면 행 전체를 꽉 채우고, 겹칠 때만 반투명 + 점선 테두리로 얹어 구분한다 */}
                   {gEvents
-                    .filter((ev) => ev.extendedProperties?.private?.plannerSource !== "daily-planner")
+                    .filter((ev) => {
+                      const priv = ev.extendedProperties?.private;
+                      if (priv?.plannerSource !== "daily-planner") return true;
+                      // 앱에서 내보낸 이벤트는, 대응하는 로컬 블록이 실제로 있을 때만 숨긴다
+                      // (다른 기기/초기화된 기기에는 로컬 블록이 없으므로 그대로 표시)
+                      const plannerId = priv?.plannerId;
+                      const hasLocalBlock = !!plannerId && data.blocks.some((b) => b.id === plannerId);
+                      return !hasLocalBlock;
+                    })
                     .map((ev) => {
                       const minutes = eventToMinutes(ev);
                       if (!minutes) return null;

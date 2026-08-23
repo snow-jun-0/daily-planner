@@ -171,7 +171,7 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
             ))}
 
             {/* 반복 일정 (요일 기반, 읽기 전용) */}
-            {recurringForDay(dow).map((b) => (
+            {recurringForDay(dow, key).map((b) => (
               <div key={b.id}
                 className="absolute left-9 right-0 rounded-md px-2 py-1 overflow-hidden"
                 style={{

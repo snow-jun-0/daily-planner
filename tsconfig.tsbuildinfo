@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/lib.ts","./src/main.tsx","./src/views/DayView.tsx","./src/views/MonthView.tsx","./src/views/RecurringModal.tsx","./src/views/SettingsModal.tsx","./src/views/YearView.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/lib.ts","./src/main.tsx","./src/views/dayview.tsx","./src/views/monthview.tsx","./src/views/recurringmodal.tsx","./src/views/settingsmodal.tsx","./src/views/yearview.tsx"],"version":"5.9.3"}

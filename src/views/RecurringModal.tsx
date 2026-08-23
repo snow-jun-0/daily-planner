@@ -15,6 +15,8 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
   const [start, setStart] = useState(9);
   const [end, setEnd] = useState(11);
   const [color, setColor] = useState(COLORS[0]);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const persist = (next: RecurringBlock[]) => {
     setList(next);
@@ -27,13 +29,38 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
 
   const add = () => {
     if (!title.trim() || days.length === 0 || end <= start) return;
-    persist([...list, { id: uid(), title: title.trim(), days, start, end, color }]);
+    persist([
+      ...list,
+      {
+        id: uid(),
+        title: title.trim(),
+        days,
+        start,
+        end,
+        color,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+      },
+    ]);
     setTitle("");
+    setStartDate("");
+    setEndDate("");
   };
 
   const remove = (id: string) => persist(list.filter((r) => r.id !== id));
 
   const inputStyle = { background: P.paper, border: `1px solid ${P.line}` };
+
+  const formatMD = (d: string) => {
+    const [, m, day] = d.split("-");
+    return `${+m}/${+day}`;
+  };
+  const formatRange = (r: RecurringBlock) => {
+    if (!r.startDate && !r.endDate) return "";
+    if (r.startDate && r.endDate) return `${formatMD(r.startDate)}~${formatMD(r.endDate)}`;
+    if (r.startDate) return `${formatMD(r.startDate)}~`;
+    return `~${formatMD(r.endDate!)}`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#22302A88" }} onClick={onClose}>
@@ -84,6 +111,24 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
           </div>
 
           <div className="flex items-center gap-2 mb-3">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="flex-1 px-2 py-2 rounded-lg text-sm"
+              style={inputStyle}
+            />
+            <span className="text-sm" style={{ color: P.faint }}>→</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="flex-1 px-2 py-2 rounded-lg text-sm"
+              style={inputStyle}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 mb-3">
             <span className="text-xs" style={{ color: P.faint }}>색상</span>
             {COLORS.map((c) => (
               <button
@@ -112,6 +157,7 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
                   <p className="text-sm font-semibold">{r.title}</p>
                   <p className="text-xs" style={{ color: P.faint }}>
                     매주 {r.days.map((d) => DAY_NAMES[d]).join("·")} · {String(r.start).padStart(2, "0")}:00–{String(r.end).padStart(2, "0")}:00
+                    {formatRange(r) && ` · ${formatRange(r)}`}
                   </p>
                 </div>
                 <button onClick={() => remove(r.id)} className="text-sm px-2" style={{ color: P.faint }} aria-label="삭제">✕</button>

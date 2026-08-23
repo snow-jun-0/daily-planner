@@ -23,6 +23,8 @@ export interface RecurringBlock {
   start: number;
   end: number;
   color?: string;
+  startDate?: string; // "YYYY-MM-DD", 이 날짜부터 표시 (없으면 제한 없음)
+  endDate?: string; // "YYYY-MM-DD", 이 날짜까지 표시 (없으면 제한 없음)
 }
 
 export interface DayData {
@@ -105,10 +107,11 @@ export function saveRecurring(list: RecurringBlock[]) {
   localStorage.setItem(RECUR_KEY, JSON.stringify(list));
 }
 
-/** 특정 요일에 해당하는 반복 일정을 Block 형태로 반환 (시간표에 얹기 위함) */
-export function recurringForDay(dow: number): (Block & { recurring: true; color?: string })[] {
+/** 특정 요일/날짜에 해당하는 반복 일정을 Block 형태로 반환 (시간표에 얹기 위함) */
+export function recurringForDay(dow: number, dateStr: string): (Block & { recurring: true; color?: string })[] {
   return loadRecurring()
     .filter((r) => r.days.includes(dow))
+    .filter((r) => (!r.startDate || dateStr >= r.startDate) && (!r.endDate || dateStr <= r.endDate))
     .map((r) => ({ id: `recur-${r.id}`, title: r.title, start: r.start, end: r.end, recurring: true as const, color: r.color }));
 }
 

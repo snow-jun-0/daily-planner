@@ -193,6 +193,11 @@ export async function deleteEvent(eventId: string): Promise<void> {
   });
 }
 
+/** 종일 일정인지 (start/end가 date만 있고 dateTime이 없음) */
+export function isAllDayEvent(ev: GEvent): boolean {
+  return !ev.start.dateTime && !!ev.start.date;
+}
+
 /** 이벤트의 dateTime을 분 단위(자정 기준)로 변환. 종일 일정(date만 있음)이면 null */
 export function eventToMinutes(ev: GEvent): { start: number; end: number } | null {
   if (!ev.start.dateTime || !ev.end.dateTime) return null;

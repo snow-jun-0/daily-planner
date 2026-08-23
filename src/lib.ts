@@ -105,6 +105,45 @@ export function splitIntoRowSegments(
   return segments;
 }
 
+/** 겹침 레인 배치 대상 아이템 (앱 블록/반복 일정/구글 일정 공통) */
+export interface LaneItem {
+  key: string;
+  start: number;
+  end: number;
+}
+
+export interface LaneAssignment {
+  lane: number; // 0부터 시작하는 세로 위치(레인) 인덱스
+  count: number; // 이 아이템이 속한 겹침 그룹의 전체 레인 수
+}
+
+/**
+ * 시간대가 겹치는 아이템들을 그룹으로 묶고, 그룹 내 개수만큼 세로 레인을 나눠 할당한다.
+ * (구글 캘린더처럼 겹치는 것끼리만 나란히 보이고, 안 겹치면 그대로 전체 높이를 씀)
+ * 연쇄적으로 겹치는 아이템(A-B 겹침, B-C 겹침)은 A-C가 직접 안 겹쳐도 같은 그룹으로 묶인다.
+ */
+export function assignLanes(items: LaneItem[]): Map<string, LaneAssignment> {
+  const sorted = [...items].sort((a, b) => a.start - b.start || a.end - b.end || a.key.localeCompare(b.key));
+  const result = new Map<string, LaneAssignment>();
+
+  let group: LaneItem[] = [];
+  let groupEnd = -Infinity;
+
+  const flush = () => {
+    group.forEach((it, idx) => result.set(it.key, { lane: idx, count: group.length }));
+    group = [];
+  };
+
+  for (const it of sorted) {
+    if (group.length > 0 && it.start >= groupEnd) flush();
+    group.push(it);
+    groupEnd = Math.max(groupEnd, it.end);
+  }
+  flush();
+
+  return result;
+}
+
 /** 기존 데이터(정수 시, 6~24)를 분 단위로 마이그레이션. 이미 분 단위(360 이상)면 그대로 둠 */
 function migrateMinutes(v: number): number {
   return v <= 24 ? v * 60 : v;

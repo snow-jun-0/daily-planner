@@ -4,10 +4,11 @@ import {
   DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay,
   MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel,
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
+  assignLanes, LaneAssignment,
 } from "../lib";
 import {
   GEvent, hasGoogleConfig,
-  listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId,
+  listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent,
 } from "../gcal";
 
 interface Props {
@@ -156,17 +157,22 @@ export default function DayView({
     return splitIntoRowSegments(s, e);
   };
 
-  /** 구글 일정이 앱 시간표 블록과 같은 시간대에 겹치는지 (겹칠 때만 구분 표시가 필요) */
-  const overlapsAppBlock = (start: number, end: number) =>
-    data.blocks.some((b) => b.start < end && start < b.end);
-
-  /** 형광펜 블록 하나(행 내 좌우 구간)의 위치·크기 스타일 — 행 높이를 꽉 채우고 좌우/상하로 살짝 inset */
-  const segStyle = (s: { row: number; leftPercent: number; widthPercent: number }) => ({
-    top: `calc(${s.row * ROW_PCT}% + ${HL_INSET_Y}px)`,
-    height: `calc(${ROW_PCT}% - ${HL_INSET_Y * 2}px)`,
-    left: `${s.leftPercent}%`,
-    width: `${s.widthPercent}%`,
-  });
+  /** 형광펜 블록 하나(행 내 좌우 구간)의 위치·크기 스타일.
+   *  안 겹치면(laneCount=1) 행 높이를 꽉 채우고, 겹치면 그 그룹 레인 수만큼 세로로 등분한다 */
+  const segStyle = (
+    s: { row: number; leftPercent: number; widthPercent: number },
+    lane = 0,
+    laneCount = 1
+  ) => {
+    const bandPct = ROW_PCT / laneCount;
+    const insetY = laneCount === 1 ? HL_INSET_Y : laneCount === 2 ? 3 : 2;
+    return {
+      top: `calc(${s.row * ROW_PCT + lane * bandPct}% + ${insetY}px)`,
+      height: `calc(${bandPct}% - ${insetY * 2}px)`,
+      left: `${s.leftPercent}%`,
+      width: `${s.widthPercent}%`,
+    };
+  };
 
   const move = (delta: number) => {
     const d = new Date(year, month, day + delta);
@@ -204,6 +210,31 @@ export default function DayView({
   const progress = data.tasks.length ? Math.round((doneCount / data.tasks.length) * 100) : 0;
 
   const inputStyle = { background: P.paper, border: `1px solid ${P.line}` };
+
+  // ---------- 구글 일정 분류: 종일 vs 시간대 ----------
+  // 앱에서 내보낸 이벤트는, 대응하는 로컬 블록이 실제로 있을 때만 숨긴다
+  // (다른 기기/초기화된 기기에는 로컬 블록이 없으므로 그대로 표시)
+  const relevantGEvents = gEvents.filter((ev) => {
+    const priv = ev.extendedProperties?.private;
+    if (priv?.plannerSource !== "daily-planner") return true;
+    const plannerId = priv?.plannerId;
+    const hasLocalBlock = !!plannerId && data.blocks.some((b) => b.id === plannerId);
+    return !hasLocalBlock;
+  });
+  const allDayGEvents = relevantGEvents.filter(isAllDayEvent);
+  const timedGEvents = relevantGEvents
+    .filter((ev) => !isAllDayEvent(ev))
+    .map((ev) => ({ ev, minutes: eventToMinutes(ev) }))
+    .filter((x): x is { ev: GEvent; minutes: { start: number; end: number } } => x.minutes !== null);
+
+  // ---------- 겹침 레인 배치: 앱 블록 + 반복 일정 + 구글 일정을 모두 함께 계산 ----------
+  const recurringList = recurringForDay(dow, key);
+  const laneMap: Map<string, LaneAssignment> = assignLanes([
+    ...recurringList.map((b) => ({ key: `rec:${b.id}`, start: b.start, end: b.end })),
+    ...data.blocks.map((b) => ({ key: `blk:${b.id}`, start: b.start, end: b.end })),
+    ...timedGEvents.map(({ ev, minutes }) => ({ key: `g:${ev.id}`, start: minutes.start, end: minutes.end })),
+  ]);
+  const laneFor = (key: string): LaneAssignment => laneMap.get(key) ?? { lane: 0, count: 1 };
 
   return (
     <div>
@@ -317,6 +348,25 @@ export default function DayView({
 
           <div className="rounded-lg" style={{ border: `1px solid ${P.line}`, overflowX: "auto" }}>
             <div style={{ minWidth: MIN_TIMETABLE_W }}>
+              {/* 종일 일정 행 — 구글 종일 이벤트가 있을 때만 표시, 격자 칸을 차지하지 않음 */}
+              {allDayGEvents.length > 0 && (
+                <div className="flex" style={{ borderBottom: `1.5px solid ${HOUR_LINE}` }}>
+                  <div
+                    className="shrink-0 flex items-center justify-center text-[10px]"
+                    style={{ width: LABEL_W, borderRight: `1.5px solid ${HOUR_LINE}`, color: P.faint }}>
+                    종일
+                  </div>
+                  <div className="flex-1 flex flex-wrap items-center gap-1 p-1">
+                    {allDayGEvents.map((ev) => (
+                      <span key={ev.id} title={ev.summary || "(제목 없음)"}
+                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap overflow-hidden text-ellipsis max-w-full"
+                        style={{ background: "#4285F42E", color: "#4285F4", border: "1px solid #4285F4" }}>
+                        {ev.summary || "(제목 없음)"}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* 분 눈금 헤더 (00/10/20/30/40/50) — 00부터 시작해 왼쪽 끝에 붙인다 */}
               <div className="flex" style={{ height: HEADER_H, borderBottom: `1.5px solid ${HOUR_LINE}` }}>
                 <div style={{ width: LABEL_W, borderRight: `1.5px solid ${HOUR_LINE}` }} className="shrink-0" />
@@ -358,23 +408,25 @@ export default function DayView({
                     )
                   )}
 
-                  {/* 반복 일정 (요일 기반, 읽기 전용) — 행 전체 높이를 채우는 형광펜 블록 */}
-                  {recurringForDay(dow, key).map((b) => {
+                  {/* 반복 일정 (요일 기반, 읽기 전용) — 안 겹치면 행 전체, 겹치면 레인만큼 세로 분할 */}
+                  {recurringList.map((b) => {
                     const segs = computeSegments(b.start, b.end);
                     if (segs.length === 0) return null;
+                    const { lane, count } = laneFor(`rec:${b.id}`);
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
                         className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
                         style={{
-                          ...segStyle(s),
+                          ...segStyle(s, lane, count),
                           background: `${b.color ?? P.green}22`,
                           borderLeft: `2px dashed ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
                         {s === primary && (
-                          <span className="text-[9px] font-semibold whitespace-nowrap" style={{ color: b.color ?? P.green }}>
+                          <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap`}
+                            style={{ color: b.color ?? P.green }}>
                             ↻ {b.title}
                           </span>
                         )}
@@ -382,24 +434,27 @@ export default function DayView({
                     ));
                   })}
 
-                  {/* 앱 시간표 블록 — 행 전체 높이를 채우는 형광펜 블록 */}
+                  {/* 앱 시간표 블록 — 안 겹치면 행 전체, 겹치면 레인만큼 세로 분할 */}
                   {data.blocks.map((b) => {
                     const segs = computeSegments(b.start, b.end);
                     if (segs.length === 0) return null;
+                    const { lane, count } = laneFor(`blk:${b.id}`);
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
                         className="absolute px-1 group overflow-hidden"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
                         style={{
-                          ...segStyle(s),
+                          ...segStyle(s, lane, count),
                           background: `${b.color ?? P.sage}44`,
                           borderLeft: `3px solid ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
                         <div className="flex justify-between items-center h-full gap-1">
                           {s === primary && (
-                            <span className="text-[9px] font-semibold whitespace-nowrap leading-none">{b.title}</span>
+                            <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap leading-none`}>
+                              {b.title}
+                            </span>
                           )}
                           <button onClick={() => removeBlock(b.id)}
                             className="opacity-0 group-hover:opacity-100 text-[9px] px-0.5 shrink-0 ml-auto"
@@ -409,44 +464,32 @@ export default function DayView({
                     ));
                   })}
 
-                  {/* 구글 캘린더 일정 (앱이 이 시간표에서 내보낸 이벤트는 중복 표시하지 않음)
-                      앱 블록과 겹치지 않으면 행 전체를 꽉 채우고, 겹칠 때만 반투명 + 점선 테두리로 얹어 구분한다 */}
-                  {gEvents
-                    .filter((ev) => {
-                      const priv = ev.extendedProperties?.private;
-                      if (priv?.plannerSource !== "daily-planner") return true;
-                      // 앱에서 내보낸 이벤트는, 대응하는 로컬 블록이 실제로 있을 때만 숨긴다
-                      // (다른 기기/초기화된 기기에는 로컬 블록이 없으므로 그대로 표시)
-                      const plannerId = priv?.plannerId;
-                      const hasLocalBlock = !!plannerId && data.blocks.some((b) => b.id === plannerId);
-                      return !hasLocalBlock;
-                    })
-                    .map((ev) => {
-                      const minutes = eventToMinutes(ev);
-                      if (!minutes) return null;
-                      const segs = computeSegments(minutes.start, minutes.end);
-                      if (segs.length === 0) return null;
-                      const overlapping = overlapsAppBlock(minutes.start, minutes.end);
-                      const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
-                      return segs.map((s, si) => (
-                        <div key={`${ev.id}-${si}`}
-                          className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
-                          title={`${ev.summary || "(제목 없음)"} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
-                          style={{
-                            ...segStyle(s),
-                            background: overlapping ? "#4285F42E" : "#4285F41A",
-                            border: overlapping ? "1.5px dashed #4285F4" : "none",
-                            borderLeft: overlapping ? "1.5px dashed #4285F4" : "2px solid #4285F4",
-                            borderRadius: 3,
-                          }}>
-                          {s === primary && (
-                            <span className="text-[8px] font-semibold whitespace-nowrap leading-none" style={{ color: "#4285F4" }}>
-                              G {ev.summary || "(제목 없음)"}
-                            </span>
-                          )}
-                        </div>
-                      ));
-                    })}
+                  {/* 구글 캘린더 일정 (앱이 이 시간표에서 내보낸 이벤트는 중복 표시하지 않음, 종일 일정은 위 "종일" 행에서 표시)
+                      안 겹치면 행 전체를 꽉 채우고, 겹치면(앱 블록끼리든, 구글끼리든, 혼합이든) 레인만큼 세로 분할 */}
+                  {timedGEvents.map(({ ev, minutes }) => {
+                    const segs = computeSegments(minutes.start, minutes.end);
+                    if (segs.length === 0) return null;
+                    const { lane, count } = laneFor(`g:${ev.id}`);
+                    const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
+                    return segs.map((s, si) => (
+                      <div key={`${ev.id}-${si}`}
+                        className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
+                        title={`${ev.summary || "(제목 없음)"} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
+                        style={{
+                          ...segStyle(s, lane, count),
+                          background: "#4285F41A",
+                          borderLeft: "2px solid #4285F4",
+                          borderRadius: 3,
+                        }}>
+                        {s === primary && (
+                          <span className={`${count > 2 ? "text-[7px]" : "text-[8px]"} font-semibold whitespace-nowrap leading-none`}
+                            style={{ color: "#4285F4" }}>
+                            G {ev.summary || "(제목 없음)"}
+                          </span>
+                        )}
+                      </div>
+                    ));
+                  })}
 
                   {/* 현재 시각 세로선 (오늘 날짜일 때만) */}
                   {nowPos && (

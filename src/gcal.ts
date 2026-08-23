@@ -4,8 +4,12 @@
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 // calendar.events만으로는 캘린더 목록(calendarList)을 읽을 수 없어, 공휴일/구독 캘린더 등
 // primary 이외의 캘린더까지 함께 조회하려면 calendarlist.readonly 스코프가 추가로 필요하다.
-const SCOPE =
+const CALENDAR_SCOPES =
   "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+// Google Tasks(할 일) 조회/완료 처리용 스코프. 구 토큰(재로그인 전)에는 이 스코프가 없을 수 있으므로
+// hasTasksScope()로 실제 부여 여부를 확인한 뒤에만 gtasks.ts에서 API를 호출한다.
+const TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
+const SCOPE = `${CALENDAR_SCOPES} ${TASKS_SCOPE}`;
 
 export function hasGoogleConfig(): boolean {
   return !!CLIENT_ID;
@@ -56,22 +60,33 @@ const TOKEN_KEY = "daily-planner-gcal-token";
 interface StoredToken {
   access_token: string;
   expires_at: number; // epoch ms
+  scope?: string; // GIS가 실제로 부여한 스코프 목록(공백 구분). 구 토큰에는 없을 수 있음
 }
 
 function saveToken(t: StoredToken) {
   localStorage.setItem(TOKEN_KEY, JSON.stringify(t));
 }
 
-export function getStoredToken(): string | null {
+function readStoredToken(): StoredToken | null {
   try {
     const raw = localStorage.getItem(TOKEN_KEY);
     if (!raw) return null;
     const t = JSON.parse(raw) as StoredToken;
     if (Date.now() >= t.expires_at - 60_000) return null; // 만료 1분 전이면 무효 처리
-    return t.access_token;
+    return t;
   } catch {
     return null;
   }
+}
+
+export function getStoredToken(): string | null {
+  return readStoredToken()?.access_token ?? null;
+}
+
+/** 현재 토큰이 Google Tasks 스코프를 실제로 포함하는지. 재로그인 전 구 토큰이면 false */
+export function hasTasksScope(): boolean {
+  const t = readStoredToken();
+  return !!t?.scope?.includes(TASKS_SCOPE);
 }
 
 export function isSignedIn(): boolean {
@@ -107,6 +122,7 @@ export async function signInGoogle(): Promise<void> {
         saveToken({
           access_token: resp.access_token,
           expires_at: Date.now() + Number(resp.expires_in) * 1000,
+          scope: resp.scope as string | undefined,
         });
         calendarListCache = null; // 새 토큰(새 스코프)이므로 캘린더 목록을 다시 조회
         resolve();
@@ -193,6 +209,7 @@ async function listCalendars(): Promise<GCalendarListEntry[]> {
         primary: !!c.primary,
       }));
     calendarListCache = { at: Date.now(), list: list.length > 0 ? list : PRIMARY_ONLY };
+    console.log("[DEBUG][gcal] listCalendars 결과:", calendarListCache.list.map((c) => ({ id: c.id, summary: c.summary, primary: c.primary })));
   } catch (e) {
     if (e instanceof Error && e.message === "NOT_SIGNED_IN") throw e;
     console.warn("[gcal] 캘린더 목록 조회 실패, primary 캘린더만 사용", e);
@@ -216,6 +233,10 @@ async function listEventsBetweenForCalendar(
   });
   const data = await apiFetch(`/calendars/${encodeURIComponent(cal.id)}/events?${params.toString()}`);
   const items = (data?.items ?? []) as GEvent[];
+  console.log(
+    `[DEBUG][gcal] 캘린더 "${cal.summary}"(${cal.id}) raw 이벤트 (범위 ${rangeStart.toISOString()} ~ ${rangeEnd.toISOString()}):`,
+    items.map((ev) => ({ summary: ev.summary, start: ev.start, end: ev.end, calendarId: cal.id }))
+  );
   return items.map((ev) => ({ ...ev, calendarId: cal.id, calendarColor: cal.backgroundColor }));
 }
 
@@ -243,7 +264,23 @@ export async function listEventsForDate(dateStr: string): Promise<GEvent[]> {
   const rangeEnd = new Date(dayStart);
   rangeEnd.setDate(rangeEnd.getDate() + 2);
   const items = await listEventsBetween(rangeStart, rangeEnd);
-  return items.filter((ev) => eventCoversDate(ev, dateStr));
+  console.log(
+    `[DEBUG][gcal] listEventsForDate(${dateStr}) 필터링 전 전체 병합 이벤트:`,
+    items.map((ev) => ({
+      summary: ev.summary,
+      start: ev.start,
+      end: ev.end,
+      calendarId: ev.calendarId,
+      isAllDay: isAllDayEvent(ev),
+      coversDate: eventCoversDate(ev, dateStr),
+    }))
+  );
+  const filtered = items.filter((ev) => eventCoversDate(ev, dateStr));
+  console.log(
+    `[DEBUG][gcal] listEventsForDate(${dateStr}) 필터링 후:`,
+    filtered.map((ev) => ({ summary: ev.summary, start: ev.start, end: ev.end, calendarId: ev.calendarId }))
+  );
+  return filtered;
 }
 
 /** 해당 달(1일~말일)에 걸치는 모든 구글 이벤트를 한 번에 가져온다. 날짜별 분배는 호출부에서 eventCoversDate로 처리 */

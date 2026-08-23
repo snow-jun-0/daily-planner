@@ -222,6 +222,10 @@ export default function DayView({
     return !hasLocalBlock;
   });
   const allDayGEvents = relevantGEvents.filter(isAllDayEvent);
+  console.log(`[DEBUG][DayView] key=${key} gEvents=${gEvents.length} relevant=${relevantGEvents.length} allDay=${allDayGEvents.length}`, {
+    gEvents: gEvents.map((ev) => ({ summary: ev.summary, start: ev.start, end: ev.end, calendarId: ev.calendarId })),
+    allDayGEvents: allDayGEvents.map((ev) => ({ summary: ev.summary, start: ev.start, end: ev.end })),
+  });
   const timedGEvents = relevantGEvents
     .filter((ev) => !isAllDayEvent(ev))
     .map((ev) => ({ ev, minutes: eventToMinutes(ev) }))

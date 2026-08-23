@@ -116,7 +116,12 @@ export default function App() {
           />
         )}
         {showTodos && (
-          <TodosModal onClose={() => setShowTodos(false)} onSelectDate={gotoDate} />
+          <TodosModal
+            gSignedIn={gSignedIn}
+            onGSignedInChange={setGSignedIn}
+            onClose={() => setShowTodos(false)}
+            onSelectDate={gotoDate}
+          />
         )}
 
         {view === "year" && (

@@ -132,18 +132,58 @@ async function apiFetch(path: string, init?: RequestInit): Promise<any> {
 
 const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export async function listEventsForDate(dateStr: string): Promise<GEvent[]> {
-  const timeMin = new Date(`${dateStr}T00:00:00`).toISOString();
-  const timeMax = new Date(`${dateStr}T23:59:59`).toISOString();
+/**
+ * 종일 일정(date만 있음)은 구글 서버가 timeMin/timeMax를 어느 타임존 기준으로 겹침 판정하는지가
+ * 명확하지 않아, 서버 쪽 timeMin/timeMax는 하루씩 여유를 두고 넓게 가져온 뒤
+ * 실제로 그 날짜를 포함하는 이벤트인지는 여기서 다시 정확히 걸러낸다.
+ */
+export function eventCoversDate(ev: GEvent, dateStr: string): boolean {
+  if (isAllDayEvent(ev)) {
+    const s = ev.start.date as string;
+    const e = (ev.end?.date as string | undefined) ?? s; // 구글 종일 일정의 end.date는 다음날(배타적)로 온다
+    return s <= dateStr && dateStr < e;
+  }
+  if (!ev.start.dateTime || !ev.end.dateTime) return false;
+  const dayStart = new Date(`${dateStr}T00:00:00`);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  const evStart = new Date(ev.start.dateTime);
+  const evEnd = new Date(ev.end.dateTime);
+  return evStart < dayEnd && evEnd > dayStart;
+}
+
+async function listEventsBetween(rangeStart: Date, rangeEnd: Date): Promise<GEvent[]> {
   const params = new URLSearchParams({
-    timeMin,
-    timeMax,
+    timeMin: rangeStart.toISOString(),
+    timeMax: rangeEnd.toISOString(),
     singleEvents: "true",
     orderBy: "startTime",
     timeZone: tz(),
+    maxResults: "2500",
   });
   const data = await apiFetch(`/calendars/primary/events?${params.toString()}`);
   return (data?.items ?? []) as GEvent[];
+}
+
+export async function listEventsForDate(dateStr: string): Promise<GEvent[]> {
+  const dayStart = new Date(`${dateStr}T00:00:00`);
+  const rangeStart = new Date(dayStart);
+  rangeStart.setDate(rangeStart.getDate() - 1);
+  const rangeEnd = new Date(dayStart);
+  rangeEnd.setDate(rangeEnd.getDate() + 2);
+  const items = await listEventsBetween(rangeStart, rangeEnd);
+  return items.filter((ev) => eventCoversDate(ev, dateStr));
+}
+
+/** 해당 달(1일~말일)에 걸치는 모든 구글 이벤트를 한 번에 가져온다. 날짜별 분배는 호출부에서 eventCoversDate로 처리 */
+export async function listEventsForMonth(year: number, month: number): Promise<GEvent[]> {
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const rangeStart = new Date(first);
+  rangeStart.setDate(rangeStart.getDate() - 1);
+  const rangeEnd = new Date(last);
+  rangeEnd.setDate(rangeEnd.getDate() + 2);
+  return listEventsBetween(rangeStart, rangeEnd);
 }
 
 /** "YYYY-MM-DD" + 분(자정 기준, 1440 넘으면 다음날로 넘김)을 로컬 dateTime 문자열로 변환 */

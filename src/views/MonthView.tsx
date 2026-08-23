@@ -1,19 +1,62 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay } from "../lib";
+import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent } from "../gcal";
 
 interface Props {
   year: number;
   month: number;
+  gSignedIn: boolean;
+  onGSignedInChange: (v: boolean) => void;
   onSelectDay: (d: number) => void;
   onChangeMonth: (y: number, m: number) => void;
   onBackToYear: () => void;
 }
 
-export default function MonthView({ year, month, onSelectDay, onChangeMonth, onBackToYear }: Props) {
+export default function MonthView({
+  year, month, gSignedIn, onGSignedInChange, onSelectDay, onChangeMonth, onBackToYear,
+}: Props) {
   const today = new Date();
   const marked = useMemo(() => daysWithData(year, month), [year, month]);
   const first = new Date(year, month, 1).getDay();
   const days = new Date(year, month + 1, 0).getDate();
+
+  const [gEvents, setGEvents] = useState<GEvent[]>([]);
+
+  // 달이 바뀌거나 구글 로그인 상태가 바뀌면 그 달의 구글 일정을 한 번에 불러옴
+  useEffect(() => {
+    if (!hasGoogleConfig() || !gSignedIn) {
+      setGEvents([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const events = await listEventsForMonth(year, month);
+        if (!cancelled) setGEvents(events);
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
+          onGSignedInChange(false);
+        }
+        setGEvents([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [year, month, gSignedIn]);
+
+  // 날짜별로 구글 일정 분배 (종일 + 시간 모두 포함, 하루에 걸쳐있는 이벤트는 그 날짜에 모두 표시)
+  const gEventsByDay = useMemo(() => {
+    const map = new Map<number, GEvent[]>();
+    if (gEvents.length === 0) return map;
+    for (let d = 1; d <= days; d++) {
+      const ds = dateKey(year, month, d);
+      const dayEvents = gEvents.filter((ev) => eventCoversDate(ev, ds));
+      if (dayEvents.length > 0) map.set(d, dayEvents);
+    }
+    return map;
+  }, [gEvents, year, month, days]);
 
   const prev = () => (month === 0 ? onChangeMonth(year - 1, 11) : onChangeMonth(year, month - 1));
   const next = () => (month === 11 ? onChangeMonth(year + 1, 0) : onChangeMonth(year, month + 1));
@@ -55,6 +98,9 @@ export default function MonthView({ year, month, onSelectDay, onChangeMonth, onB
           const has = marked.has(d);
           const data = has ? loadDay(dateKey(year, month, d)) : null;
           const remaining = data ? data.tasks.filter((t) => !t.done).length : 0;
+          const dayGEvents = (gEventsByDay.get(d) ?? [])
+            .slice()
+            .sort((a, b) => Number(isAllDayEvent(b)) - Number(isAllDayEvent(a)));
 
           return (
             <button
@@ -90,6 +136,22 @@ export default function MonthView({ year, month, onSelectDay, onChangeMonth, onB
                   {remaining > 0 && (
                     <span className="text-[9px] px-1 rounded" style={{ background: `${P.highlight}66` }}>
                       할 일 {remaining}
+                    </span>
+                  )}
+                </div>
+              )}
+              {dayGEvents.length > 0 && (
+                <div className="mt-1 flex flex-col gap-0.5 overflow-hidden">
+                  {dayGEvents.slice(0, 2).map((ev) => (
+                    <span key={ev.id} className="text-[9px] truncate px-1 rounded flex items-center gap-0.5"
+                      style={{ background: "#4285F42E", color: "#4285F4" }}>
+                      <span className="shrink-0" style={{ fontSize: 6 }}>●</span>
+                      {ev.summary || "(제목 없음)"}
+                    </span>
+                  ))}
+                  {dayGEvents.length > 2 && (
+                    <span className="text-[9px] px-1" style={{ color: "#4285F4" }}>
+                      +{dayGEvents.length - 2}
                     </span>
                   )}
                 </div>

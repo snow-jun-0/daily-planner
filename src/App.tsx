@@ -130,6 +130,8 @@ export default function App() {
           <MonthView
             year={year}
             month={month}
+            gSignedIn={gSignedIn}
+            onGSignedInChange={setGSignedIn}
             onBackToYear={() => setView("year")}
             onChangeMonth={(y, m) => { setYear(y); setMonth(m); }}
             onSelectDay={(d) => { setDay(d); setView("day"); }}

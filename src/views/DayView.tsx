@@ -8,7 +8,7 @@ import {
 } from "../lib";
 import {
   GEvent, hasGoogleConfig,
-  listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent,
+  listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent, eventUid,
 } from "../gcal";
 
 interface Props {
@@ -232,7 +232,7 @@ export default function DayView({
   const laneMap: Map<string, LaneAssignment> = assignLanes([
     ...recurringList.map((b) => ({ key: `rec:${b.id}`, start: b.start, end: b.end })),
     ...data.blocks.map((b) => ({ key: `blk:${b.id}`, start: b.start, end: b.end })),
-    ...timedGEvents.map(({ ev, minutes }) => ({ key: `g:${ev.id}`, start: minutes.start, end: minutes.end })),
+    ...timedGEvents.map(({ ev, minutes }) => ({ key: `g:${eventUid(ev)}`, start: minutes.start, end: minutes.end })),
   ]);
   const laneFor = (key: string): LaneAssignment => laneMap.get(key) ?? { lane: 0, count: 1 };
 
@@ -358,7 +358,7 @@ export default function DayView({
                   </div>
                   <div className="flex-1 flex flex-wrap items-center gap-1 p-1">
                     {allDayGEvents.map((ev) => (
-                      <span key={ev.id} title={ev.summary || "(제목 없음)"}
+                      <span key={eventUid(ev)} title={ev.summary || "(제목 없음)"}
                         className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap overflow-hidden text-ellipsis max-w-full"
                         style={{ background: "#4285F42E", color: "#4285F4", border: "1px solid #4285F4" }}>
                         {ev.summary || "(제목 없음)"}
@@ -469,10 +469,10 @@ export default function DayView({
                   {timedGEvents.map(({ ev, minutes }) => {
                     const segs = computeSegments(minutes.start, minutes.end);
                     if (segs.length === 0) return null;
-                    const { lane, count } = laneFor(`g:${ev.id}`);
+                    const { lane, count } = laneFor(`g:${eventUid(ev)}`);
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
-                      <div key={`${ev.id}-${si}`}
+                      <div key={`${eventUid(ev)}-${si}`}
                         className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
                         title={`${ev.summary || "(제목 없음)"} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
                         style={{

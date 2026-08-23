@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay } from "../lib";
-import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent } from "../gcal";
+import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent, eventUid } from "../gcal";
 
 interface Props {
   year: number;
@@ -143,7 +143,7 @@ export default function MonthView({
               {dayGEvents.length > 0 && (
                 <div className="mt-1 flex flex-col gap-0.5 overflow-hidden">
                   {dayGEvents.slice(0, 2).map((ev) => (
-                    <span key={ev.id} className="text-[9px] truncate px-1 rounded flex items-center gap-0.5"
+                    <span key={eventUid(ev)} className="text-[9px] truncate px-1 rounded flex items-center gap-0.5"
                       style={{ background: "#4285F42E", color: "#4285F4" }}>
                       <span className="shrink-0" style={{ fontSize: 6 }}>●</span>
                       {ev.summary || "(제목 없음)"}

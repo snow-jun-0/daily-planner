@@ -2,7 +2,10 @@
 // 서버 함수 없이 브라우저에서 직접 Google Identity Services + Calendar REST API를 사용한다.
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-const SCOPE = "https://www.googleapis.com/auth/calendar.events";
+// calendar.events만으로는 캘린더 목록(calendarList)을 읽을 수 없어, 공휴일/구독 캘린더 등
+// primary 이외의 캘린더까지 함께 조회하려면 calendarlist.readonly 스코프가 추가로 필요하다.
+const SCOPE =
+  "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 
 export function hasGoogleConfig(): boolean {
   return !!CLIENT_ID;
@@ -10,10 +13,17 @@ export function hasGoogleConfig(): boolean {
 
 export interface GEvent {
   id: string;
+  calendarId?: string; // 여러 캘린더를 병합할 때 이벤트가 속한 캘린더 (id 충돌 방지 + 추적용)
+  calendarColor?: string;
   summary?: string;
   start: { dateTime?: string; date?: string; timeZone?: string };
   end: { dateTime?: string; date?: string; timeZone?: string };
   extendedProperties?: { private?: Record<string, string> };
+}
+
+/** 여러 캘린더에 걸친 이벤트를 React key 등에서 구분하기 위한 고유 키 */
+export function eventUid(ev: GEvent): string {
+  return `${ev.calendarId ?? "primary"}:${ev.id}`;
 }
 
 // ---------- gsi/client 스크립트 동적 로드 ----------
@@ -71,6 +81,7 @@ export function isSignedIn(): boolean {
 export function signOutGoogle() {
   const raw = localStorage.getItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_KEY);
+  calendarListCache = null; // 재로그인 시(스코프가 바뀌었을 수 있으므로) 캘린더 목록을 다시 조회하게 함
   try {
     if (raw) {
       const t = JSON.parse(raw) as StoredToken;
@@ -97,6 +108,7 @@ export async function signInGoogle(): Promise<void> {
           access_token: resp.access_token,
           expires_at: Date.now() + Number(resp.expires_in) * 1000,
         });
+        calendarListCache = null; // 새 토큰(새 스코프)이므로 캘린더 목록을 다시 조회
         resolve();
       },
     });
@@ -152,7 +164,48 @@ export function eventCoversDate(ev: GEvent, dateStr: string): boolean {
   return evStart < dayEnd && evEnd > dayStart;
 }
 
-async function listEventsBetween(rangeStart: Date, rangeEnd: Date): Promise<GEvent[]> {
+// ---------- 캘린더 목록 (primary + 공휴일/구독 캘린더 등) ----------
+export interface GCalendarListEntry {
+  id: string;
+  summary: string;
+  backgroundColor?: string;
+  primary?: boolean;
+}
+
+let calendarListCache: { at: number; list: GCalendarListEntry[] } | null = null;
+const CALENDAR_LIST_TTL = 5 * 60_000;
+const PRIMARY_ONLY: GCalendarListEntry[] = [{ id: "primary", summary: "primary", primary: true }];
+
+/** 사용자가 접근 가능한 모든 캘린더 목록(캘린더별 이벤트 병합 조회에 사용). 실패하면 primary만으로 폴백 */
+async function listCalendars(): Promise<GCalendarListEntry[]> {
+  if (calendarListCache && Date.now() - calendarListCache.at < CALENDAR_LIST_TTL) {
+    return calendarListCache.list;
+  }
+  try {
+    const data = await apiFetch(`/users/me/calendarList?minAccessRole=freeBusyReader&maxResults=250`);
+    const items = (data?.items ?? []) as any[];
+    const list: GCalendarListEntry[] = items
+      .filter((c) => !c.deleted)
+      .map((c) => ({
+        id: c.id as string,
+        summary: (c.summary as string) ?? c.id,
+        backgroundColor: c.backgroundColor as string | undefined,
+        primary: !!c.primary,
+      }));
+    calendarListCache = { at: Date.now(), list: list.length > 0 ? list : PRIMARY_ONLY };
+  } catch (e) {
+    if (e instanceof Error && e.message === "NOT_SIGNED_IN") throw e;
+    console.warn("[gcal] 캘린더 목록 조회 실패, primary 캘린더만 사용", e);
+    calendarListCache = { at: Date.now(), list: PRIMARY_ONLY };
+  }
+  return calendarListCache.list;
+}
+
+async function listEventsBetweenForCalendar(
+  cal: GCalendarListEntry,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<GEvent[]> {
   const params = new URLSearchParams({
     timeMin: rangeStart.toISOString(),
     timeMax: rangeEnd.toISOString(),
@@ -161,8 +214,26 @@ async function listEventsBetween(rangeStart: Date, rangeEnd: Date): Promise<GEve
     timeZone: tz(),
     maxResults: "2500",
   });
-  const data = await apiFetch(`/calendars/primary/events?${params.toString()}`);
-  return (data?.items ?? []) as GEvent[];
+  const data = await apiFetch(`/calendars/${encodeURIComponent(cal.id)}/events?${params.toString()}`);
+  const items = (data?.items ?? []) as GEvent[];
+  return items.map((ev) => ({ ...ev, calendarId: cal.id, calendarColor: cal.backgroundColor }));
+}
+
+/** 접근 가능한 모든 캘린더의 이벤트를 병렬로 조회해 하나로 병합한다 */
+async function listEventsBetween(rangeStart: Date, rangeEnd: Date): Promise<GEvent[]> {
+  const calendars = await listCalendars();
+  const results = await Promise.all(
+    calendars.map(async (cal) => {
+      try {
+        return await listEventsBetweenForCalendar(cal, rangeStart, rangeEnd);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_SIGNED_IN") throw e;
+        console.warn(`[gcal] 캘린더(${cal.summary}) 이벤트 조회 실패`, e);
+        return [] as GEvent[];
+      }
+    })
+  );
+  return results.flat();
 }
 
 export async function listEventsForDate(dateStr: string): Promise<GEvent[]> {

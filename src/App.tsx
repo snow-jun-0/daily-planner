@@ -3,6 +3,7 @@ import YearView from "./views/YearView";
 import MonthView from "./views/MonthView";
 import DayView from "./views/DayView";
 import SettingsModal from "./views/SettingsModal";
+import RecurringModal from "./views/RecurringModal";
 import { P, downloadICS } from "./lib";
 
 type View = "year" | "month" | "day";
@@ -11,6 +12,8 @@ export default function App() {
   const today = new Date();
   const [view, setView] = useState<View>("day");
   const [showSettings, setShowSettings] = useState(false);
+  const [showRecurring, setShowRecurring] = useState(false);
+  const [recurringVersion, setRecurringVersion] = useState(0);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [day, setDay] = useState(today.getDate());
@@ -31,15 +34,21 @@ export default function App() {
           <p className="text-xs tracking-widest font-medium" style={{ color: P.faint }}>
             DAILY PLANNER
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             <button onClick={goToday}
               className="text-xs px-3 py-1.5 rounded-lg font-medium text-white"
               style={{ background: P.green }}>
               오늘
             </button>
-            <button onClick={downloadICS}
+            <button onClick={() => setShowRecurring(true)}
               className="text-xs px-3 py-1.5 rounded-lg font-medium"
               style={{ color: P.green, border: `1px solid ${P.green}` }}
+              title="매주 반복되는 고정 일정 관리">
+              ↻ 반복 일정
+            </button>
+            <button onClick={downloadICS}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ color: P.faint, border: `1px solid ${P.line}` }}
               title="일정을 .ics 파일로 내보내서 구글/애플 캘린더에 추가">
               캘린더 내보내기
             </button>
@@ -53,6 +62,12 @@ export default function App() {
         </div>
 
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        {showRecurring && (
+          <RecurringModal
+            onClose={() => setShowRecurring(false)}
+            onChanged={() => setRecurringVersion((v) => v + 1)}
+          />
+        )}
 
         {view === "year" && (
           <YearView
@@ -75,6 +90,7 @@ export default function App() {
             year={year}
             month={month}
             day={day}
+            recurringVersion={recurringVersion}
             onBack={() => setView("month")}
             onChangeDay={(y, m, d) => { setYear(y); setMonth(m); setDay(d); }}
           />

@@ -1,0 +1,125 @@
+import { useState } from "react";
+import { P, HOURS, DAY_NAMES, RecurringBlock, uid, loadRecurring, saveRecurring } from "../lib";
+
+interface Props {
+  onClose: () => void;
+  onChanged: () => void;
+}
+
+const COLORS = ["#2F6B4F", "#2C5AA0", "#C0392B", "#B8860B", "#7D3C98", "#0E7490"];
+
+export default function RecurringModal({ onClose, onChanged }: Props) {
+  const [list, setList] = useState<RecurringBlock[]>(() => loadRecurring());
+  const [title, setTitle] = useState("");
+  const [days, setDays] = useState<number[]>([1]); // 기본 월요일
+  const [start, setStart] = useState(9);
+  const [end, setEnd] = useState(11);
+  const [color, setColor] = useState(COLORS[0]);
+
+  const persist = (next: RecurringBlock[]) => {
+    setList(next);
+    saveRecurring(next);
+    onChanged();
+  };
+
+  const toggleDay = (d: number) =>
+    setDays((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d].sort()));
+
+  const add = () => {
+    if (!title.trim() || days.length === 0 || end <= start) return;
+    persist([...list, { id: uid(), title: title.trim(), days, start, end, color }]);
+    setTitle("");
+  };
+
+  const remove = (id: string) => persist(list.filter((r) => r.id !== id));
+
+  const inputStyle = { background: P.paper, border: `1px solid ${P.line}` };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#22302A88" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: P.card }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xl font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>반복 일정</h2>
+          <button onClick={onClose} className="text-lg px-2" style={{ color: P.faint }} aria-label="닫기">✕</button>
+        </div>
+        <p className="text-xs mb-5" style={{ color: P.faint }}>
+          매주 정해진 요일·시간에 자동으로 시간표에 표시돼. (수업, 알바, 운동 등)
+        </p>
+
+        {/* 새 반복 일정 입력 */}
+        <div className="rounded-xl p-4 mb-5" style={{ background: P.paper }}>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="일정 이름 (예: 자료구조 수업)"
+            className="w-full px-3 py-2.5 rounded-lg text-sm mb-3"
+            style={{ background: P.card, border: `1px solid ${P.line}` }}
+          />
+
+          <div className="flex gap-1 mb-3">
+            {DAY_NAMES.map((name, d) => (
+              <button
+                key={d}
+                onClick={() => toggleDay(d)}
+                className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
+                style={{
+                  background: days.includes(d) ? P.green : "transparent",
+                  color: days.includes(d) ? "#fff" : (d === 0 ? P.red : d === 6 ? "#2C5AA0" : P.faint),
+                  border: `1px solid ${days.includes(d) ? P.green : P.line}`,
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 mb-3">
+            <select value={start} onChange={(e) => setStart(+e.target.value)} className="flex-1 px-2 py-2 rounded-lg text-sm" style={inputStyle}>
+              {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}시</option>)}
+            </select>
+            <span className="text-sm" style={{ color: P.faint }}>→</span>
+            <select value={end} onChange={(e) => setEnd(+e.target.value)} className="flex-1 px-2 py-2 rounded-lg text-sm" style={inputStyle}>
+              {HOURS.map((h) => <option key={h + 1} value={h + 1}>{String(h + 1).padStart(2, "0")}시</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs" style={{ color: P.faint }}>색상</span>
+            {COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setColor(c)}
+                className="w-6 h-6 rounded-full transition-transform"
+                style={{ background: c, transform: color === c ? "scale(1.2)" : "scale(1)", boxShadow: color === c ? `0 0 0 2px ${P.card}, 0 0 0 4px ${c}` : "none" }}
+                aria-label={`색상 ${c}`}
+              />
+            ))}
+          </div>
+
+          <button onClick={add} className="w-full py-2.5 rounded-lg text-sm font-semibold text-white" style={{ background: P.green }}>
+            추가
+          </button>
+        </div>
+
+        {/* 등록된 반복 일정 목록 */}
+        {list.length === 0 ? (
+          <p className="text-sm text-center py-4" style={{ color: P.faint }}>아직 반복 일정이 없어.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {list.map((r) => (
+              <li key={r.id} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: P.paper, borderLeft: `4px solid ${r.color ?? P.green}` }}>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold">{r.title}</p>
+                  <p className="text-xs" style={{ color: P.faint }}>
+                    매주 {r.days.map((d) => DAY_NAMES[d]).join("·")} · {String(r.start).padStart(2, "0")}:00–{String(r.end).padStart(2, "0")}:00
+                  </p>
+                </div>
+                <button onClick={() => remove(r.id)} className="text-sm px-2" style={{ color: P.faint }} aria-label="삭제">✕</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}

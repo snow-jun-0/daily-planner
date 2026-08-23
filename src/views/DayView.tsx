@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Block, DayData, HOURS, MOODS, P, PRIORITIES, Priority,
-  DAY_NAMES, dateKey, loadDay, saveDay, uid,
+  DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay,
 } from "../lib";
 
 interface Props {
   year: number;
   month: number;
   day: number;
+  recurringVersion: number; // 반복 일정 변경 시 리렌더 트리거
   onBack: () => void;
   onChangeDay: (y: number, m: number, d: number) => void;
 }
 
-export default function DayView({ year, month, day, onBack, onChangeDay }: Props) {
+export default function DayView({ year, month, day, recurringVersion, onBack, onChangeDay }: Props) {
   const key = dateKey(year, month, day);
   const [data, setData] = useState<DayData>(() => loadDay(key));
 
@@ -37,6 +38,9 @@ export default function DayView({ year, month, day, onBack, onChangeDay }: Props
     const t = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
+
+  // 반복 일정 변경 시 리렌더 (recurringForDay를 다시 읽기 위함)
+  useEffect(() => {}, [recurringVersion]);
 
   const dow = new Date(year, month, day).getDay();
   const isToday =
@@ -166,6 +170,28 @@ export default function DayView({ year, month, day, onBack, onChangeDay }: Props
               </div>
             ))}
 
+            {/* 반복 일정 (요일 기반, 읽기 전용) */}
+            {recurringForDay(dow).map((b) => (
+              <div key={b.id}
+                className="absolute left-9 right-0 rounded-md px-2 py-1 overflow-hidden"
+                style={{
+                  top: `${((b.start - 6) / 18) * 100}%`,
+                  height: `${((b.end - b.start) / 18) * 100}%`,
+                  background: `${b.color ?? P.green}1A`,
+                  borderLeft: `3px dashed ${b.color ?? P.green}`,
+                }}>
+                <div className="flex items-start gap-1">
+                  <span className="text-[10px] mt-0.5" style={{ color: b.color ?? P.green }}>↻</span>
+                  <div>
+                    <p className="text-xs font-semibold leading-tight" style={{ color: b.color ?? P.green }}>{b.title}</p>
+                    <p className="text-[10px]" style={{ color: P.faint }}>
+                      {String(b.start).padStart(2, "0")}:00 – {String(b.end).padStart(2, "0")}:00
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
             {data.blocks.map((b) => (
               <div key={b.id}
                 className="absolute left-9 right-0 rounded-md px-2 py-1 group overflow-hidden"
@@ -278,13 +304,13 @@ export default function DayView({ year, month, day, onBack, onChangeDay }: Props
             </ul>
           </section>
 
-          <section className="rounded-xl p-5 flex-1" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+          <section className="rounded-xl p-5 flex-1 flex flex-col" style={{ background: P.card, border: `1px solid ${P.line}` }}>
             <h2 className="text-lg font-bold mb-3" style={{ fontFamily: "'Gowun Batang', serif" }}>메모</h2>
             <textarea
               value={data.memo}
               onChange={(e) => setData((p) => ({ ...p, memo: e.target.value }))}
               placeholder="떠오르는 생각, 회고, 내일 챙길 것…"
-              className="w-full h-36 px-3 py-2.5 rounded-lg text-sm resize-none"
+              className="w-full flex-1 min-h-[16rem] px-3 py-2.5 rounded-lg text-sm resize-none"
               style={{
                 ...inputStyle,
                 backgroundImage: `repeating-linear-gradient(transparent, transparent 27px, ${P.line} 28px)`,

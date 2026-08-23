@@ -15,6 +15,16 @@ export interface Block {
   end: number; // 시 (7~24)
 }
 
+/** 반복 일정: 특정 요일마다 반복되는 고정 일정 (예: 매주 월/수 09-11 수업) */
+export interface RecurringBlock {
+  id: string;
+  title: string;
+  days: number[]; // 요일 0(일)~6(토), 여러 개 가능
+  start: number;
+  end: number;
+  color?: string;
+}
+
 export interface DayData {
   tasks: Task[];
   blocks: Block[];
@@ -77,6 +87,29 @@ export function saveDay(key: string, data: DayData) {
   if (isEmpty) delete store[key];
   else store[key] = data;
   saveStore(store);
+}
+
+// ---------- 반복 일정 저장소 ----------
+const RECUR_KEY = "daily-planner-recurring-v1";
+
+export function loadRecurring(): RecurringBlock[] {
+  try {
+    const raw = localStorage.getItem(RECUR_KEY);
+    return raw ? (JSON.parse(raw) as RecurringBlock[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecurring(list: RecurringBlock[]) {
+  localStorage.setItem(RECUR_KEY, JSON.stringify(list));
+}
+
+/** 특정 요일에 해당하는 반복 일정을 Block 형태로 반환 (시간표에 얹기 위함) */
+export function recurringForDay(dow: number): (Block & { recurring: true; color?: string })[] {
+  return loadRecurring()
+    .filter((r) => r.days.includes(dow))
+    .map((r) => ({ id: `recur-${r.id}`, title: r.title, start: r.start, end: r.end, recurring: true as const, color: r.color }));
 }
 
 // ---------- JSON 백업/복원 ----------

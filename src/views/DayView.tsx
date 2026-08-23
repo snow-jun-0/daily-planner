@@ -6,7 +6,7 @@ import {
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
 } from "../lib";
 import {
-  GEvent, hasGoogleConfig, isSignedIn, signInGoogle, signOutGoogle,
+  GEvent, hasGoogleConfig,
   listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId,
 } from "../gcal";
 
@@ -15,6 +15,8 @@ interface Props {
   month: number;
   day: number;
   recurringVersion: number; // 반복 일정 변경 시 리렌더 트리거
+  gSignedIn: boolean; // 구글 캘린더 연결 상태 (상단바와 공유)
+  onGSignedInChange: (v: boolean) => void;
   onBack: () => void;
   onChangeDay: (y: number, m: number, d: number) => void;
 }
@@ -34,7 +36,9 @@ const HOUR_LINE = "#2A332E"; // 시(hour) 구분용 진한 실선 색
 // 위아래만 살짝 inset해 행 안에 여백을 준다
 const HL_INSET_Y = 4;
 
-export default function DayView({ year, month, day, recurringVersion, onBack, onChangeDay }: Props) {
+export default function DayView({
+  year, month, day, recurringVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay,
+}: Props) {
   const key = dateKey(year, month, day);
   const [data, setData] = useState<DayData>(() => loadDay(key));
 
@@ -47,7 +51,6 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
   const [now, setNow] = useState(new Date());
   const memoRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const [gSignedIn, setGSignedIn] = useState(isSignedIn());
   const [gEvents, setGEvents] = useState<GEvent[]>([]);
   const [gBusy, setGBusy] = useState(false);
   const [gMsg, setGMsg] = useState("");
@@ -94,7 +97,7 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
       } catch (e) {
         if (cancelled) return;
         if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
-          setGSignedIn(false);
+          onGSignedInChange(false);
           setGEvents([]);
         } else {
           setGMsg("구글 일정을 불러오지 못했어");
@@ -105,26 +108,6 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
       cancelled = true;
     };
   }, [key, gSignedIn]);
-
-  const connectGoogle = async () => {
-    setGBusy(true);
-    setGMsg("");
-    try {
-      await signInGoogle();
-      setGSignedIn(true);
-    } catch {
-      setGMsg("구글 연결에 실패했어");
-    } finally {
-      setGBusy(false);
-    }
-  };
-
-  const disconnectGoogle = () => {
-    signOutGoogle();
-    setGSignedIn(false);
-    setGEvents([]);
-    setGMsg("");
-  };
 
   const exportDayToGoogle = async () => {
     setGBusy(true);
@@ -146,7 +129,7 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
       setGMsg(`${created}개 등록, ${skipped}개 이미 있음`);
     } catch (e) {
       if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
-        setGSignedIn(false);
+        onGSignedInChange(false);
         setGMsg("다시 연결해줘");
       } else {
         setGMsg("전송 중 오류가 발생했어");
@@ -224,14 +207,14 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
 
   return (
     <div>
-      {/* 헤더 */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      {/* 헤더 — 모바일에서는 back+진행률 한 줄, 날짜가 그 아래 전체 폭으로 쌓임 */}
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 mb-3 sm:mb-6">
         <button onClick={onBack} className="text-sm px-3 py-1.5 rounded-lg" style={{ color: P.faint, border: `1px solid ${P.line}` }}>
           ‹ {month + 1}월
         </button>
-        <div className="flex items-center gap-4">
-          <button onClick={() => move(-1)} className="text-2xl px-2" style={{ color: P.faint }} aria-label="이전 날">‹</button>
-          <h1 className="text-xl sm:text-2xl font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>
+        <div className="order-3 sm:order-none w-full sm:w-auto flex items-center justify-center gap-2 sm:gap-4">
+          <button onClick={() => move(-1)} className="text-xl sm:text-2xl px-2" style={{ color: P.faint }} aria-label="이전 날">‹</button>
+          <h1 className="text-lg sm:text-2xl font-bold text-center" style={{ fontFamily: "'Gowun Batang', serif" }}>
             {month + 1}월 {day}일{" "}
             <span style={{ color: dow === 0 ? P.red : dow === 6 ? "#2C5AA0" : P.green }}>
               {DAY_NAMES[dow]}
@@ -242,26 +225,26 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
               </span>
             )}
           </h1>
-          <button onClick={() => move(1)} className="text-2xl px-2" style={{ color: P.faint }} aria-label="다음 날">›</button>
+          <button onClick={() => move(1)} className="text-xl sm:text-2xl px-2" style={{ color: P.faint }} aria-label="다음 날">›</button>
         </div>
         <div className="text-right">
-          <p className="text-lg font-semibold" style={{ fontFamily: "'Gowun Batang', serif", color: P.green }}>
+          <p className="text-base sm:text-lg font-semibold" style={{ fontFamily: "'Gowun Batang', serif", color: P.green }}>
             {progress}<span className="text-xs">%</span>
           </p>
-          <div className="w-20 h-1.5 rounded-full" style={{ background: P.line }}>
+          <div className="w-16 sm:w-20 h-1.5 rounded-full" style={{ background: P.line }}>
             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress}%`, background: P.green }} />
           </div>
         </div>
       </div>
 
       {/* 오늘 기분 */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-1.5 sm:gap-2 mb-3 sm:mb-6 flex-wrap">
         <span className="text-xs" style={{ color: P.faint }}>오늘 기분</span>
         {MOODS.map((m) => (
           <button
             key={m}
             onClick={() => setData((p) => ({ ...p, mood: p.mood === m ? undefined : m }))}
-            className={`mood-btn text-lg leading-none rounded-full w-9 h-9 flex items-center justify-center ${data.mood === m ? "on" : ""}`}
+            className={`mood-btn text-base sm:text-lg leading-none rounded-full w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center ${data.mood === m ? "on" : ""}`}
             aria-label={`기분 ${m}`}
             style={{
               background: data.mood === m ? P.card : "transparent",
@@ -279,29 +262,12 @@ export default function DayView({ year, month, day, recurringVersion, onBack, on
         <section className="md:col-span-3 rounded-xl p-4" style={{ background: P.card, border: `1px solid ${P.line}` }}>
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="text-lg font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>시간표</h2>
-            {hasGoogleConfig() && (
-              <div className="flex items-center gap-1.5">
-                {!gSignedIn ? (
-                  <button onClick={connectGoogle} disabled={gBusy}
-                    className="text-xs px-2.5 py-1 rounded-lg font-medium"
-                    style={{ border: `1px solid ${P.line}`, color: P.faint }}>
-                    구글 캘린더 연결
-                  </button>
-                ) : (
-                  <>
-                    <button onClick={exportDayToGoogle} disabled={gBusy}
-                      className="text-xs px-2.5 py-1 rounded-lg font-medium text-white"
-                      style={{ background: P.green }}>
-                      구글로 보내기
-                    </button>
-                    <button onClick={disconnectGoogle} disabled={gBusy}
-                      className="text-xs px-2.5 py-1 rounded-lg font-medium"
-                      style={{ border: `1px solid ${P.line}`, color: P.faint }}>
-                      연결 해제
-                    </button>
-                  </>
-                )}
-              </div>
+            {hasGoogleConfig() && gSignedIn && (
+              <button onClick={exportDayToGoogle} disabled={gBusy}
+                className="text-xs px-2.5 py-1 rounded-lg font-medium text-white"
+                style={{ background: P.green }}>
+                구글로 보내기
+              </button>
             )}
           </div>
           {gMsg && (

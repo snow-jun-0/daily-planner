@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay } from "../lib";
+import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay, allHabitsDoneForDate } from "../lib";
 import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent, eventUid } from "../gcal";
 
 interface Props {
   year: number;
   month: number;
+  habitsVersion: number; // 습관 목록 변경 시 리렌더 트리거
   gSignedIn: boolean;
   onGSignedInChange: (v: boolean) => void;
   onSelectDay: (d: number) => void;
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export default function MonthView({
-  year, month, gSignedIn, onGSignedInChange, onSelectDay, onChangeMonth, onBackToYear,
+  year, month, habitsVersion, gSignedIn, onGSignedInChange, onSelectDay, onChangeMonth, onBackToYear,
 }: Props) {
   const today = new Date();
   const marked = useMemo(() => daysWithData(year, month), [year, month]);
@@ -57,6 +58,16 @@ export default function MonthView({
     }
     return map;
   }, [gEvents, year, month, days]);
+
+  // 그 달에서 지정 습관을 전부 완료한 날짜(day 숫자) 집합
+  const habitDoneDays = useMemo(() => {
+    const set = new Set<number>();
+    for (let d = 1; d <= days; d++) {
+      const dow = (first + d - 1) % 7;
+      if (allHabitsDoneForDate(dateKey(year, month, d), dow)) set.add(d);
+    }
+    return set;
+  }, [year, month, days, first, habitsVersion]);
 
   const prev = () => (month === 0 ? onChangeMonth(year - 1, 11) : onChangeMonth(year, month - 1));
   const next = () => (month === 11 ? onChangeMonth(year + 1, 0) : onChangeMonth(year, month + 1));
@@ -106,13 +117,21 @@ export default function MonthView({
             <button
               key={d}
               onClick={() => onSelectDay(d)}
-              className="rounded-xl p-2 min-h-[4.5rem] sm:min-h-[5.5rem] text-left flex flex-col transition-transform hover:-translate-y-0.5"
+              className="relative rounded-xl p-2 min-h-[4.5rem] sm:min-h-[5.5rem] text-left flex flex-col transition-transform hover:-translate-y-0.5"
               style={{
                 background: P.card,
                 border: `1px solid ${isToday ? P.green : P.line}`,
                 boxShadow: isToday ? `0 0 0 2px ${P.green}33` : "none",
               }}
             >
+              {habitDoneDays.has(d) && (
+                <span
+                  className="absolute bottom-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
+                  style={{ background: P.green }}
+                  title="습관 모두 완료"
+                  aria-hidden="true"
+                />
+              )}
               <span className="flex items-center justify-between w-full">
                 <span
                   className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full"

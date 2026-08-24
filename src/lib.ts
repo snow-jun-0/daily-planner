@@ -426,6 +426,161 @@ export function downloadICS() {
   URL.revokeObjectURL(url);
 }
 
+// ---------- 습관 트래커 ----------
+/** 매일(또는 지정 요일마다) 반복하는 습관. targetDays가 비어있으면 매일 습관 */
+export interface Habit {
+  id: string;
+  name: string;
+  emoji?: string;
+  color?: string;
+  targetDays?: number[]; // 요일 0(일)~6(토). 비어있거나 없으면 매일
+  createdAt: string; // "YYYY-MM-DD" — 이 날짜 이전은 스트릭·달성률 계산에서 제외
+}
+
+export const HABIT_EMOJIS = ["💪", "💧", "📚", "🏃", "🧘", "😴", "🥗", "✍️", "🎯", "🚭", "🧹", "☀️"];
+
+export const HABIT_COLORS = ["#2F6B4F", "#2C5AA0", "#C0392B", "#B8860B", "#7D3C98", "#0E7490"];
+
+const HABIT_KEY = "daily-planner-habits-v1";
+
+export function loadHabits(): Habit[] {
+  try {
+    const raw = localStorage.getItem(HABIT_KEY);
+    return raw ? (JSON.parse(raw) as Habit[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveHabits(list: Habit[]) {
+  localStorage.setItem(HABIT_KEY, JSON.stringify(list));
+}
+
+// ---------- 습관 완료 기록 (날짜별) ----------
+const HABIT_LOG_KEY = "daily-planner-habit-log-v1";
+
+type HabitLog = Record<string, Record<string, boolean>>; // dateKey -> habitId -> done
+
+function loadHabitLog(): HabitLog {
+  try {
+    const raw = localStorage.getItem(HABIT_LOG_KEY);
+    return raw ? (JSON.parse(raw) as HabitLog) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveHabitLog(log: HabitLog) {
+  localStorage.setItem(HABIT_LOG_KEY, JSON.stringify(log));
+}
+
+export function isHabitDone(dateStr: string, habitId: string): boolean {
+  return !!loadHabitLog()[dateStr]?.[habitId];
+}
+
+export function setHabitDone(dateStr: string, habitId: string, done: boolean) {
+  const log = loadHabitLog();
+  if (done) {
+    log[dateStr] = { ...(log[dateStr] ?? {}), [habitId]: true };
+  } else if (log[dateStr]) {
+    const rest = { ...log[dateStr] };
+    delete rest[habitId];
+    if (Object.keys(rest).length === 0) delete log[dateStr];
+    else log[dateStr] = rest;
+  }
+  saveHabitLog(log);
+}
+
+/** 해당 요일에 습관이 적용되는지 (targetDays 없거나 비어있으면 매일 적용) */
+function habitAppliesToDay(habit: Habit, dow: number): boolean {
+  return !habit.targetDays || habit.targetDays.length === 0 || habit.targetDays.includes(dow);
+}
+
+/** 특정 날짜에 표시해야 할 습관 목록 (요일 매칭 + 습관 생성일 이후) */
+export function habitsForDate(dateStr: string, dow: number): Habit[] {
+  return loadHabits().filter((h) => (!h.createdAt || dateStr >= h.createdAt) && habitAppliesToDay(h, dow));
+}
+
+/** 해당 날짜에 적용되는 습관을 전부 완료했는지 (적용되는 습관이 하나도 없으면 false) */
+export function allHabitsDoneForDate(dateStr: string, dow: number): boolean {
+  const applicable = habitsForDate(dateStr, dow);
+  if (applicable.length === 0) return false;
+  const log = loadHabitLog();
+  return applicable.every((h) => !!log[dateStr]?.[h.id]);
+}
+
+/**
+ * 기준일(기본 오늘)부터 거꾸로 며칠 연속 완료했는지 계산.
+ * targetDays가 있는 습관은 해당 요일만 카운트하고, 적용 안 되는 날은 건너뛴다(스트릭 안 끊김).
+ * 기준일 자체가 아직 미완료여도(하루가 안 끝났으므로) 스트릭을 끊지 않고 그 전날부터 계산한다.
+ */
+export function getStreak(habitId: string, refDateStr?: string): number {
+  const habit = loadHabits().find((h) => h.id === habitId);
+  if (!habit) return 0;
+  const log = loadHabitLog();
+
+  const ref = refDateStr ? new Date(`${refDateStr}T00:00:00`) : new Date();
+  ref.setHours(0, 0, 0, 0);
+  const cursor = new Date(ref);
+
+  let streak = 0;
+  let isRefDay = true;
+  for (let i = 0; i < 3650; i++) { // 최대 10년치까지만 순회 (안전장치)
+    const ds = dateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+    if (ds < habit.createdAt) break;
+    if (habitAppliesToDay(habit, cursor.getDay())) {
+      const done = !!log[ds]?.[habitId];
+      if (done) streak++;
+      else if (!isRefDay) break;
+    }
+    isRefDay = false;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function startOfWeek(d: Date): Date {
+  const r = new Date(d);
+  r.setHours(0, 0, 0, 0);
+  r.setDate(r.getDate() - r.getDay());
+  return r;
+}
+
+function startOfMonth(d: Date): Date {
+  const r = new Date(d.getFullYear(), d.getMonth(), 1);
+  r.setHours(0, 0, 0, 0);
+  return r;
+}
+
+/** [start, end] 기간(포함) 중 습관이 적용되는 날 대비 완료한 비율(%) */
+function habitRateForRange(habitId: string, start: Date, end: Date): number {
+  const habit = loadHabits().find((h) => h.id === habitId);
+  if (!habit) return 0;
+  const log = loadHabitLog();
+  let total = 0;
+  let done = 0;
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const ds = dateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+    if ((!habit.createdAt || ds >= habit.createdAt) && habitAppliesToDay(habit, cursor.getDay())) {
+      total++;
+      if (log[ds]?.[habitId]) done++;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return total ? Math.round((done / total) * 100) : 0;
+}
+
+/** 이번 주(일요일 시작)부터 오늘까지의 달성률(%) */
+export function getWeekRate(habitId: string, ref: Date = new Date()): number {
+  return habitRateForRange(habitId, startOfWeek(ref), ref);
+}
+
+/** 이번 달 1일부터 오늘까지의 달성률(%) */
+export function getMonthRate(habitId: string, ref: Date = new Date()): number {
+  return habitRateForRange(habitId, startOfMonth(ref), ref);
+}
+
 // ---------- 테마 ----------
 export const P = {
   paper: "#F4F6F1",

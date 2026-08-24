@@ -5,6 +5,7 @@ import DayView from "./views/DayView";
 import SettingsModal from "./views/SettingsModal";
 import RecurringModal from "./views/RecurringModal";
 import TodosModal from "./views/TodosModal";
+import HabitModal from "./views/HabitModal";
 import { P } from "./lib";
 import { hasGoogleConfig, isSignedIn, signInGoogle, signOutGoogle } from "./gcal";
 
@@ -16,7 +17,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showRecurring, setShowRecurring] = useState(false);
   const [showTodos, setShowTodos] = useState(false);
+  const [showHabits, setShowHabits] = useState(false);
   const [recurringVersion, setRecurringVersion] = useState(0);
+  const [habitsVersion, setHabitsVersion] = useState(0);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [day, setDay] = useState(today.getDate());
@@ -82,6 +85,12 @@ export default function App() {
               title="모든 날짜의 완료하지 않은 할 일 모아보기">
               전체 할 일
             </button>
+            <button onClick={() => setShowHabits(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ color: P.green, border: `1px solid ${P.green}` }}
+              title="매일 반복하는 습관 관리">
+              습관
+            </button>
             {hasGoogleConfig() && (
               gSignedIn ? (
                 <button onClick={disconnectGoogle} disabled={gBusy}
@@ -123,6 +132,12 @@ export default function App() {
             onSelectDate={gotoDate}
           />
         )}
+        {showHabits && (
+          <HabitModal
+            onClose={() => setShowHabits(false)}
+            onChanged={() => setHabitsVersion((v) => v + 1)}
+          />
+        )}
 
         {view === "year" && (
           <YearView
@@ -135,6 +150,7 @@ export default function App() {
           <MonthView
             year={year}
             month={month}
+            habitsVersion={habitsVersion}
             gSignedIn={gSignedIn}
             onGSignedInChange={setGSignedIn}
             onBackToYear={() => setView("year")}
@@ -148,6 +164,7 @@ export default function App() {
             month={month}
             day={day}
             recurringVersion={recurringVersion}
+            habitsVersion={habitsVersion}
             gSignedIn={gSignedIn}
             onGSignedInChange={setGSignedIn}
             onBack={() => setView("month")}

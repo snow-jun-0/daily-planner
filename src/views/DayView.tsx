@@ -5,6 +5,7 @@ import {
   MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel,
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
   assignLanes, LaneAssignment,
+  habitsForDate, isHabitDone, setHabitDone, getStreak,
 } from "../lib";
 import {
   GEvent, hasGoogleConfig,
@@ -16,6 +17,7 @@ interface Props {
   month: number;
   day: number;
   recurringVersion: number; // 반복 일정 변경 시 리렌더 트리거
+  habitsVersion: number; // 습관 목록 변경 시 리렌더 트리거
   gSignedIn: boolean; // 구글 캘린더 연결 상태 (상단바와 공유)
   onGSignedInChange: (v: boolean) => void;
   onBack: () => void;
@@ -38,10 +40,11 @@ const HOUR_LINE = "#2A332E"; // 시(hour) 구분용 진한 실선 색
 const HL_INSET_Y = 4;
 
 export default function DayView({
-  year, month, day, recurringVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay,
+  year, month, day, recurringVersion, habitsVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay,
 }: Props) {
   const key = dateKey(year, month, day);
   const [data, setData] = useState<DayData>(() => loadDay(key));
+  const [, setHabitTick] = useState(0); // 습관 체크 시 리렌더 트리거용 (기록 자체는 별도 저장소에 저장)
 
   const [taskInput, setTaskInput] = useState("");
   const [taskPriority, setTaskPriority] = useState<Priority>("mid");
@@ -83,6 +86,8 @@ export default function DayView({
 
   // 반복 일정 변경 시 리렌더 (recurringForDay를 다시 읽기 위함)
   useEffect(() => {}, [recurringVersion]);
+  // 습관 목록 변경 시 리렌더 (habitsForDate를 다시 읽기 위함)
+  useEffect(() => {}, [habitsVersion]);
 
   // 날짜나 구글 로그인 상태가 바뀌면 그 날의 구글 캘린더 일정을 불러옴
   useEffect(() => {
@@ -206,6 +211,13 @@ export default function DayView({
     setBlockEnd((prevEnd) => (prevEnd <= v ? v + 10 : prevEnd));
   };
 
+  // 오늘 해당하는 습관 (요일 매칭). habitTick(체크 시)·habitsVersion(습관 목록 변경 시)에 따라 다시 계산됨
+  const todaysHabits = habitsForDate(key, dow);
+  const toggleHabit = (habitId: string) => {
+    setHabitDone(key, habitId, !isHabitDone(key, habitId));
+    setHabitTick((v) => v + 1);
+  };
+
   const doneCount = data.tasks.filter((t) => t.done).length;
   const progress = data.tasks.length ? Math.round((doneCount / data.tasks.length) * 100) : 0;
 
@@ -291,6 +303,45 @@ export default function DayView({
           </button>
         ))}
       </div>
+
+      {/* 오늘의 습관 — 등록된 습관이 없으면 섹션 자체를 숨김 */}
+      {todaysHabits.length > 0 && (
+        <section className="rounded-xl p-4 mb-3 sm:mb-6" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+          <h2 className="text-base font-bold mb-3" style={{ fontFamily: "'Gowun Batang', serif" }}>
+            오늘의 습관
+          </h2>
+          <ul className="flex flex-col gap-1.5">
+            {todaysHabits.map((h) => {
+              const done = isHabitDone(key, h.id);
+              const streak = getStreak(h.id, key);
+              return (
+                <li key={h.id} className="flex items-center gap-2 px-2 py-2 rounded-lg"
+                  style={{ background: done ? "transparent" : P.paper }}>
+                  <button onClick={() => toggleHabit(h.id)}
+                    aria-label={done ? "완료 취소" : "완료 표시"}
+                    className="w-5 h-5 rounded shrink-0 flex items-center justify-center text-xs font-bold"
+                    style={{
+                      border: `2px solid ${done ? (h.color ?? P.green) : P.sage}`,
+                      background: done ? (h.color ?? P.green) : "transparent",
+                      color: "#fff",
+                    }}>
+                    {done ? "✓" : ""}
+                  </button>
+                  <span className="text-base leading-none shrink-0">{h.emoji}</span>
+                  <span className="flex-1 text-sm" style={{ color: done ? P.faint : P.ink }}>
+                    {h.name}
+                  </span>
+                  {streak > 0 && (
+                    <span className="text-xs font-semibold shrink-0" style={{ color: h.color ?? P.green }}>
+                      🔥{streak}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <div className="grid md:grid-cols-5 gap-6">
         {/* 시간표 — 오른쪽 할 일/메모보다 넓게 배치 */}

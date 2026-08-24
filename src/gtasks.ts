@@ -38,11 +38,14 @@ async function apiFetch(path: string, init?: RequestInit): Promise<any> {
   });
 
   if (res.status === 401) {
+    console.warn(`[DEBUG][gtasks] ${path} → 401 (NOT_SIGNED_IN)`);
     // calendar.ts의 apiFetch와 달리 여기서는 토큰 자체를 지우지 않는다.
     // 토큰이 캘린더 스코프까지 함께 담고 있어, 지우면 캘린더 연결까지 끊어지기 때문.
     throw new Error("NOT_SIGNED_IN");
   }
   if (res.status === 403) {
+    const body = await res.text().catch(() => "");
+    console.warn(`[DEBUG][gtasks] ${path} → 403 (NO_TASKS_SCOPE로 처리). 응답 본문(스코프 부족인지 API 미활성화인지 여기서 구분 가능):`, body);
     // 스코프 부족(구 토큰) 등으로 권한이 없는 경우. 할 일 기능만 비활성화하고 넘어간다.
     throw new Error("NO_TASKS_SCOPE");
   }
@@ -55,17 +58,25 @@ async function apiFetch(path: string, init?: RequestInit): Promise<any> {
 
 async function listTaskLists(): Promise<GTaskList[]> {
   const data = await apiFetch(`/users/@me/lists?maxResults=100`);
+  console.log("[DEBUG][gtasks] /users/@me/lists 원본 응답:", data);
   const items = (data?.items ?? []) as any[];
-  return items.map((l) => ({ id: l.id as string, title: (l.title as string) ?? l.id }));
+  const lists = items.map((l) => ({ id: l.id as string, title: (l.title as string) ?? l.id }));
+  console.log(`[DEBUG][gtasks] task list ${lists.length}개 발견:`, lists);
+  return lists;
 }
 
 async function listIncompleteTasksForList(list: GTaskList): Promise<GTask[]> {
   const params = new URLSearchParams({ showCompleted: "false", showHidden: "false", maxResults: "100" });
   const data = await apiFetch(`/lists/${encodeURIComponent(list.id)}/tasks?${params.toString()}`);
+  console.log(`[DEBUG][gtasks] 리스트 "${list.title}"(${list.id}) /tasks 원본 응답:`, data);
   const items = (data?.items ?? []) as any[];
-  return items
-    .filter((t) => t.status !== "completed")
-    .map((t) => ({
+  console.log(
+    `[DEBUG][gtasks] 리스트 "${list.title}" 원본 task 항목 (필터 전, status/due/hidden 포함):`,
+    items.map((t) => ({ id: t.id, title: t.title, status: t.status, due: t.due, hidden: t.hidden, deleted: t.deleted }))
+  );
+  const filtered = items.filter((t) => t.status !== "completed");
+  console.log(`[DEBUG][gtasks] 리스트 "${list.title}" status!=='completed' 필터 후 ${filtered.length}개 (원본 ${items.length}개)`);
+  return filtered.map((t) => ({
       id: t.id as string,
       taskListId: list.id,
       taskListTitle: list.title,
@@ -80,7 +91,10 @@ async function listIncompleteTasksForList(list: GTaskList): Promise<GTask[]> {
  * 호출부가 각 상황에 맞게 처리할 수 있게 하고, 개별 리스트 조회 실패는 조용히 건너뛴다.
  */
 export async function listAllIncompleteGTasks(): Promise<GTask[]> {
-  if (!hasTasksScope()) return [];
+  if (!hasTasksScope()) {
+    console.log("[DEBUG][gtasks] listAllIncompleteGTasks: hasTasksScope() === false → 여기서 빈 배열 반환, API 호출 안 함");
+    return [];
+  }
   const lists = await listTaskLists();
   const results = await Promise.all(
     lists.map(async (l) => {
@@ -93,7 +107,9 @@ export async function listAllIncompleteGTasks(): Promise<GTask[]> {
       }
     })
   );
-  return results.flat();
+  const merged = results.flat();
+  console.log(`[DEBUG][gtasks] listAllIncompleteGTasks 최종 병합 결과 (${merged.length}개):`, merged);
+  return merged;
 }
 
 /** 할 일을 완료 처리 (앱 → 구글, 양방향 동기화용) */

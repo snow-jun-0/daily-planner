@@ -86,7 +86,9 @@ export function getStoredToken(): string | null {
 /** 현재 토큰이 Google Tasks 스코프를 실제로 포함하는지. 재로그인 전 구 토큰이면 false */
 export function hasTasksScope(): boolean {
   const t = readStoredToken();
-  return !!t?.scope?.includes(TASKS_SCOPE);
+  const result = !!t?.scope?.includes(TASKS_SCOPE);
+  console.log("[DEBUG][gcal] hasTasksScope() 호출 - 저장된 토큰의 scope 전체:", t?.scope, "| 판정 결과:", result);
+  return result;
 }
 
 export function isSignedIn(): boolean {
@@ -100,7 +102,12 @@ export function signOutGoogle() {
   try {
     if (raw) {
       const t = JSON.parse(raw) as StoredToken;
-      window.google?.accounts?.oauth2?.revoke?.(t.access_token);
+      const revokeFn = window.google?.accounts?.oauth2?.revoke;
+      console.log("[DEBUG][gcal] signOutGoogle - window.google 로드 여부:", !!window.google, "| revoke 함수 존재 여부:", !!revokeFn);
+      if (!revokeFn) {
+        console.warn("[DEBUG][gcal] revoke() 를 호출하지 못함 (gsi 스크립트 미로드) - 구글 서버 측 동의(consent)가 실제로는 해제되지 않았을 수 있음. 재로그인해도 새 스코프 동의 화면이 안 뜰 수 있음");
+      }
+      revokeFn?.(t.access_token);
     }
   } catch {
     // 무시
@@ -119,6 +126,9 @@ export async function signInGoogle(): Promise<void> {
           reject(new Error(resp.error));
           return;
         }
+        console.log("[DEBUG][gcal] signInGoogle 콜백 원본 resp:", resp);
+        console.log("[DEBUG][gcal] GIS가 실제로 부여한 scope 문자열:", resp.scope);
+        console.log("[DEBUG][gcal] tasks 스코프 포함 여부(부여된 scope 기준):", (resp.scope as string | undefined)?.includes(TASKS_SCOPE));
         saveToken({
           access_token: resp.access_token,
           expires_at: Date.now() + Number(resp.expires_in) * 1000,

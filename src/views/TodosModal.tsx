@@ -18,9 +18,12 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
   const [gMsg, setGMsg] = useState("");
   const [gBusy, setGBusy] = useState<Set<string>>(new Set());
   const showGoogleHint = hasGoogleConfig() && gSignedIn && !hasTasksScope();
+  console.log("[DEBUG][TodosModal] 렌더링 조건 체크 - hasGoogleConfig:", hasGoogleConfig(), "| gSignedIn:", gSignedIn, "| hasTasksScope:", hasTasksScope(), "| showGoogleHint:", showGoogleHint);
 
   useEffect(() => {
+    console.log("[DEBUG][TodosModal] useEffect 실행 - hasGoogleConfig:", hasGoogleConfig(), "| gSignedIn:", gSignedIn);
     if (!hasGoogleConfig() || !gSignedIn) {
+      console.log("[DEBUG][TodosModal] hasGoogleConfig() 또는 gSignedIn이 false라서 여기서 return, gTasks=[] 유지");
       setGTasks([]);
       return;
     }
@@ -28,9 +31,11 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
     (async () => {
       try {
         const tasks = await listAllIncompleteGTasks();
+        console.log(`[DEBUG][TodosModal] listAllIncompleteGTasks() 결과 (${tasks.length}개):`, tasks);
         if (!cancelled) setGTasks(tasks);
       } catch (e) {
         if (cancelled) return;
+        console.warn("[DEBUG][TodosModal] listAllIncompleteGTasks() 예외 발생:", e);
         if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
           onGSignedInChange(false);
           setGTasks([]);
@@ -86,6 +91,7 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
   };
 
   const sortedGTasks = [...gTasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+  console.log(`[DEBUG][TodosModal] 렌더링 시점 gTasks state (${gTasks.length}개) - 이 목록이 비어있으면 위 useEffect 로그에서 어디서 끊겼는지 확인:`, gTasks);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#22302A88" }} onClick={onClose}>

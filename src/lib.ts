@@ -553,7 +553,7 @@ function startOfMonth(d: Date): Date {
 }
 
 /** [start, end] 기간(포함) 중 습관이 적용되는 날 대비 완료한 비율(%) */
-function habitRateForRange(habitId: string, start: Date, end: Date): number {
+export function habitRateForRange(habitId: string, start: Date, end: Date): number {
   const habit = loadHabits().find((h) => h.id === habitId);
   if (!habit) return 0;
   const log = loadHabitLog();
@@ -593,3 +593,147 @@ export const P = {
   highlight: "#F5D547",
   red: "#C0392B",
 };
+
+// ---------- 통계 집계 ----------
+/** 통계 차트용 색상 팔레트 (P 팔레트 기반) */
+export const CHART_COLORS = [P.green, P.highlight, "#2C5AA0", P.red, "#7D3C98", P.sage];
+
+/** 특정 습관의 해당 월(1일~말일, 미래는 오늘까지) 달성률(%) */
+export function getHabitMonthRate(habitId: string, year: number, month: number): number {
+  const monthStart = new Date(year, month, 1);
+  const monthEnd = new Date(year, month + 1, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const rangeEnd = monthEnd < today ? monthEnd : today;
+  if (rangeEnd < monthStart) return 0;
+  return habitRateForRange(habitId, monthStart, rangeEnd);
+}
+
+export interface DayTaskStat {
+  day: number;
+  total: number;
+  done: number;
+  rate: number | null; // 그 날 할 일이 없으면 null
+}
+
+export interface DayMoodStat {
+  day: number;
+  mood: string | null;
+}
+
+export interface MoodCount {
+  mood: string;
+  count: number;
+}
+
+export interface HabitMonthStat {
+  habit: Habit;
+  rate: number; // 이번(조회 중인) 달 달성률(%)
+  streak: number; // 현재(오늘 기준) 연속 스트릭
+}
+
+export interface HourBucket {
+  hour: number; // 6~23
+  minutes: number; // 그 달 동안 이 시간대에 등록된 시간표 블록 총 분
+}
+
+export interface MonthStats {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  taskByDay: DayTaskStat[];
+  moodByDay: DayMoodStat[];
+  moodCounts: MoodCount[];
+  recordedDays: number; // 무언가(할 일/일정/메모/기분)라도 기록된 날 수
+  totalTasks: number;
+  totalDone: number;
+  overallTaskRate: number; // 0~100
+  habitStats: HabitMonthStat[];
+  avgHabitRate: number; // 0~100, 적용 가능한 습관이 없으면 0
+  longestHabitStreak: number; // 습관 중 최장 현재 스트릭
+  hourBuckets: HourBucket[];
+  totalBlockMinutes: number;
+}
+
+/** 해당 월의 할 일/무드/습관/시간표 데이터를 한 번에 집계 (읽기 전용, 저장 데이터는 수정하지 않음) */
+export function getMonthStats(year: number, month: number): MonthStats {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthEndKey = dateKey(year, month, daysInMonth);
+
+  const taskByDay: DayTaskStat[] = [];
+  const moodByDay: DayMoodStat[] = [];
+  const moodCountMap = new Map<string, number>();
+  const hourMinutes = new Map<number, number>();
+  let recordedDays = 0;
+  let totalTasks = 0;
+  let totalDone = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const data = loadDay(dateKey(year, month, d));
+    const hasData =
+      data.tasks.length > 0 || data.blocks.length > 0 || data.memo.trim() !== "" || !!data.mood;
+    if (hasData) recordedDays++;
+
+    const done = data.tasks.filter((t) => t.done).length;
+    totalTasks += data.tasks.length;
+    totalDone += done;
+    taskByDay.push({
+      day: d,
+      total: data.tasks.length,
+      done,
+      rate: data.tasks.length ? Math.round((done / data.tasks.length) * 100) : null,
+    });
+
+    moodByDay.push({ day: d, mood: data.mood ?? null });
+    if (data.mood) moodCountMap.set(data.mood, (moodCountMap.get(data.mood) ?? 0) + 1);
+
+    for (const b of data.blocks) {
+      const firstHour = Math.floor(b.start / 60);
+      const lastHour = Math.floor((b.end - 1) / 60);
+      for (let h = firstHour; h <= lastHour; h++) {
+        const rowStart = h * 60;
+        const rowEnd = rowStart + 60;
+        const segStart = Math.max(b.start, rowStart);
+        const segEnd = Math.min(b.end, rowEnd);
+        if (segEnd > segStart) hourMinutes.set(h, (hourMinutes.get(h) ?? 0) + (segEnd - segStart));
+      }
+    }
+  }
+
+  const moodCounts: MoodCount[] = MOODS
+    .map((mood) => ({ mood, count: moodCountMap.get(mood) ?? 0 }))
+    .filter((m) => m.count > 0);
+
+  const habitStats: HabitMonthStat[] = loadHabits()
+    .filter((h) => h.createdAt <= monthEndKey)
+    .map((h) => ({
+      habit: h,
+      rate: getHabitMonthRate(h.id, year, month),
+      streak: getStreak(h.id),
+    }));
+  const avgHabitRate = habitStats.length
+    ? Math.round(habitStats.reduce((sum, h) => sum + h.rate, 0) / habitStats.length)
+    : 0;
+  const longestHabitStreak = habitStats.length ? Math.max(...habitStats.map((h) => h.streak)) : 0;
+
+  const hourBuckets: HourBucket[] = HOURS.map((h) => ({ hour: h, minutes: hourMinutes.get(h) ?? 0 }));
+  const totalBlockMinutes = hourBuckets.reduce((sum, b) => sum + b.minutes, 0);
+
+  return {
+    year,
+    month,
+    daysInMonth,
+    taskByDay,
+    moodByDay,
+    moodCounts,
+    recordedDays,
+    totalTasks,
+    totalDone,
+    overallTaskRate: totalTasks ? Math.round((totalDone / totalTasks) * 100) : 0,
+    habitStats,
+    avgHabitRate,
+    longestHabitStreak,
+    hourBuckets,
+    totalBlockMinutes,
+  };
+}

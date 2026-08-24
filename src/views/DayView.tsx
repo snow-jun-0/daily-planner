@@ -22,6 +22,7 @@ interface Props {
   onGSignedInChange: (v: boolean) => void;
   onBack: () => void;
   onChangeDay: (y: number, m: number, d: number) => void;
+  onStartFocus: (title: string) => void;
 }
 
 // ---------- 가로 시간표 격자 레이아웃 상수 ----------
@@ -40,7 +41,7 @@ const HOUR_LINE = "#2A332E"; // 시(hour) 구분용 진한 실선 색
 const HL_INSET_Y = 4;
 
 export default function DayView({
-  year, month, day, recurringVersion, habitsVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay,
+  year, month, day, recurringVersion, habitsVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay, onStartFocus,
 }: Props) {
   const key = dateKey(year, month, day);
   const [data, setData] = useState<DayData>(() => loadDay(key));
@@ -511,9 +512,16 @@ export default function DayView({
                               {b.title}
                             </span>
                           )}
-                          <button onClick={() => removeBlock(b.id)}
-                            className="opacity-0 group-hover:opacity-100 text-[9px] px-0.5 shrink-0 ml-auto"
-                            style={{ color: P.faint }} aria-label="일정 삭제">✕</button>
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
+                            {s === primary && (
+                              <button onClick={() => onStartFocus(b.title)}
+                                className="text-[9px] px-0.5"
+                                style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
+                            )}
+                            <button onClick={() => removeBlock(b.id)}
+                              className="text-[9px] px-0.5"
+                              style={{ color: P.faint }} aria-label="일정 삭제">✕</button>
+                          </div>
                         </div>
                       </div>
                     ));

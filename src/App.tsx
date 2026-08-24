@@ -2,14 +2,17 @@ import { useState } from "react";
 import YearView from "./views/YearView";
 import MonthView from "./views/MonthView";
 import DayView from "./views/DayView";
+import StatsView from "./views/StatsView";
 import SettingsModal from "./views/SettingsModal";
 import RecurringModal from "./views/RecurringModal";
 import TodosModal from "./views/TodosModal";
 import HabitModal from "./views/HabitModal";
+import TimerModal from "./views/TimerModal";
 import { P } from "./lib";
 import { hasGoogleConfig, isSignedIn, signInGoogle, signOutGoogle } from "./gcal";
+import { usePomodoro, formatMs } from "./pomodoro";
 
-type View = "year" | "month" | "day";
+type View = "year" | "month" | "day" | "stats";
 
 export default function App() {
   const today = new Date();
@@ -18,8 +21,15 @@ export default function App() {
   const [showRecurring, setShowRecurring] = useState(false);
   const [showTodos, setShowTodos] = useState(false);
   const [showHabits, setShowHabits] = useState(false);
+  const [showTimer, setShowTimer] = useState(false);
   const [recurringVersion, setRecurringVersion] = useState(0);
   const [habitsVersion, setHabitsVersion] = useState(0);
+  const pomodoro = usePomodoro();
+
+  const startFocusFor = (title: string) => {
+    pomodoro.start(title);
+    setShowTimer(true);
+  };
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [day, setDay] = useState(today.getDate());
@@ -91,6 +101,26 @@ export default function App() {
               title="매일 반복하는 습관 관리">
               습관
             </button>
+            <button onClick={() => setShowTimer(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{
+                color: pomodoro.status === "running" ? "#fff" : (pomodoro.phase === "focus" ? P.green : P.sage),
+                background: pomodoro.status === "running" ? (pomodoro.phase === "focus" ? P.green : P.sage) : "transparent",
+                border: `1px solid ${pomodoro.phase === "focus" ? P.green : P.sage}`,
+              }}
+              title="뽀모도로 집중 타이머">
+              ⏱ 타이머{pomodoro.status !== "idle" ? ` ${formatMs(pomodoro.remainingMs)}` : ""}
+            </button>
+            <button onClick={() => setView("stats")}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{
+                color: view === "stats" ? "#fff" : P.green,
+                background: view === "stats" ? P.green : "transparent",
+                border: `1px solid ${P.green}`,
+              }}
+              title="완료율·무드·습관·시간표 통계 보기">
+              통계
+            </button>
             {hasGoogleConfig() && (
               gSignedIn ? (
                 <button onClick={disconnectGoogle} disabled={gBusy}
@@ -138,6 +168,7 @@ export default function App() {
             onChanged={() => setHabitsVersion((v) => v + 1)}
           />
         )}
+        {showTimer && <TimerModal api={pomodoro} onClose={() => setShowTimer(false)} />}
 
         {view === "year" && (
           <YearView
@@ -169,8 +200,10 @@ export default function App() {
             onGSignedInChange={setGSignedIn}
             onBack={() => setView("month")}
             onChangeDay={(y, m, d) => { setYear(y); setMonth(m); setDay(d); }}
+            onStartFocus={startFocusFor}
           />
         )}
+        {view === "stats" && <StatsView onBack={() => setView("month")} />}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dateKey } from "./lib";
+import { dateKey, getNotifyMode } from "./lib";
 
 // ---------- 타입 ----------
 export type PomodoroPhase = "focus" | "break";
@@ -85,6 +85,17 @@ export function getTodayPomodoroCount(): number {
   return loadLog()[todayKey()] ?? 0;
 }
 
+/** 해당 월의 완료 뽀모도로 세션 개수·누적 집중 분(현재 focusMin 설정 기준 추정) */
+export function getMonthPomodoroStats(year: number, month: number): { count: number; minutes: number } {
+  const log = loadLog();
+  const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+  let count = 0;
+  for (const [k, v] of Object.entries(log)) {
+    if (k.startsWith(prefix)) count += v;
+  }
+  return { count, minutes: count * loadPomodoroSettings().focusMin };
+}
+
 function incrementTodayPomodoroCount(): number {
   const log = loadLog();
   const k = todayKey();
@@ -135,11 +146,18 @@ function playBeep() {
   }
 }
 
+/** 알림 방식(무음/진동/소리)에 따라 뽀모도로 단계 종료를 알림. justCompleted 화면 배너는
+ *  이 함수와 별개로 항상 뜨므로, "무음"이어도 시각적 알림은 유지된다 */
 function notifyPhaseEnd(t: PhaseTransition) {
-  playBeep();
+  const mode = getNotifyMode();
   const title = t.phase === "focus" ? "집중 끝!" : "휴식 끝!";
   const body = t.next === "focus" ? "다시 집중을 시작해봐" : "잠깐 쉬어가자";
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+
+  if (mode === "sound") playBeep();
+  if (mode === "vibrate" && typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+    navigator.vibrate([200, 100, 200]);
+  }
+  if (mode !== "mute" && typeof Notification !== "undefined" && Notification.permission === "granted") {
     try {
       new Notification(title, { body });
     } catch {
@@ -243,7 +261,6 @@ export function usePomodoro(): PomodoroApi {
     : state.remainingMs;
 
   const start = useCallback((label?: string | null) => {
-    void requestNotificationPermission();
     const dur = durationFor("focus", settingsRef.current);
     setJustCompleted(null);
     setState({ phase: "focus", status: "running", endTime: Date.now() + dur, remainingMs: dur, label: label ?? null });
@@ -257,7 +274,6 @@ export function usePomodoro(): PomodoroApi {
   }, []);
 
   const resume = useCallback(() => {
-    void requestNotificationPermission();
     setState((prev) => {
       if (prev.status !== "paused") return prev;
       return { ...prev, status: "running", endTime: Date.now() + prev.remainingMs };

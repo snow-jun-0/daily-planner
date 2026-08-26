@@ -32,12 +32,9 @@ export interface DayData {
   tasks: Task[];
   blocks: Block[];
   memo: string;
-  mood?: string; // 오늘 기분 이모지
 }
 
 export const EMPTY_DAY: DayData = { tasks: [], blocks: [], memo: "" };
-
-export const MOODS = ["😊", "😴", "🔥", "😵‍💫", "🥲", "😎"];
 
 export const PRIORITIES: { id: Priority; label: string; color: string; bg: string }[] = [
   { id: "high", label: "중요", color: "#C0392B", bg: "#FBEAE7" },
@@ -203,7 +200,7 @@ export function saveDay(key: string, data: DayData) {
   const store = loadStore();
   const isEmpty =
     data.tasks.length === 0 && data.blocks.length === 0 &&
-    data.memo.trim() === "" && !data.mood;
+    data.memo.trim() === "";
   if (isEmpty) delete store[key];
   else store[key] = data;
   saveStore(store);
@@ -225,6 +222,17 @@ export function allIncompleteTasks(): { date: string; task: Task }[] {
 export function markTaskDone(key: string, taskId: string) {
   const day = loadDay(key);
   saveDay(key, { ...day, tasks: day.tasks.map((t) => (t.id === taskId ? { ...t, done: true } : t)) });
+}
+
+/** 메모가 있는 모든 날짜를 날짜 오름차순으로 반환 (메모 전체보기용) */
+export function allMemos(): { date: string; memo: string }[] {
+  const store = loadStore();
+  const result: { date: string; memo: string }[] = [];
+  for (const k of Object.keys(store).sort()) {
+    const memo = store[k].memo;
+    if (memo && memo.trim() !== "") result.push({ date: k, memo });
+  }
+  return result;
 }
 
 // ---------- 반복 일정 저장소 ----------
@@ -277,6 +285,13 @@ export function importJSON(text: string): number {
   }
   saveStore(store);
   return count;
+}
+
+/** 이 앱이 쓰는 모든 localStorage 데이터를 삭제 (키 접두사 "daily-planner"로 식별) */
+export function resetAllData() {
+  Object.keys(localStorage)
+    .filter((k) => k.startsWith("daily-planner"))
+    .forEach((k) => localStorage.removeItem(k));
 }
 
 // ---------- 클라우드 동기화 (Supabase REST) ----------
@@ -581,6 +596,111 @@ export function getMonthRate(habitId: string, ref: Date = new Date()): number {
   return habitRateForRange(habitId, startOfMonth(ref), ref);
 }
 
+// ---------- D-Day ----------
+export interface DDay {
+  id: string;
+  title: string;
+  date: string; // "YYYY-MM-DD"
+  color: string;
+  googleEventId?: string; // 구글 캘린더 종일 이벤트와 연결된 경우 (역동기화·삭제용)
+}
+
+export const DDAY_COLORS = ["#E8724C", "#F5B94A", "#7EC08A", "#7FB5D9", "#B98AD4"];
+
+const DDAY_KEY = "daily-planner-ddays-v1";
+
+/** 날짜 가까운 순(오늘 기준 D-day 오름차순 = 날짜 오름차순과 동일)으로 정렬해 반환 */
+export function loadDDays(): DDay[] {
+  try {
+    const raw = localStorage.getItem(DDAY_KEY);
+    const list = raw ? (JSON.parse(raw) as DDay[]) : [];
+    return [...list].sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
+  }
+}
+
+export function saveDDays(list: DDay[]) {
+  localStorage.setItem(DDAY_KEY, JSON.stringify(list));
+}
+
+export function addDDay(dday: DDay) {
+  saveDDays([...loadDDays(), dday]);
+}
+
+export function removeDDay(id: string) {
+  saveDDays(loadDDays().filter((d) => d.id !== id));
+}
+
+/** 구글 이벤트 생성 완료 후 googleEventId를 로컬 D-Day에 채워 넣음 */
+export function setDDayGoogleEventId(id: string, googleEventId: string) {
+  saveDDays(loadDDays().map((d) => (d.id === id ? { ...d, googleEventId } : d)));
+}
+
+/** dateStr(오늘 기준) 까지 남은/지난 일수를 "D-N" / "D-DAY" / "D+N" 형태 문자열로 반환 */
+export function getDDayCount(dateStr: string, refDateStr?: string): string {
+  const ref = refDateStr ? new Date(`${refDateStr}T00:00:00`) : new Date();
+  ref.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  const diffDays = Math.round((target.getTime() - ref.getTime()) / 86_400_000);
+  if (diffDays === 0) return "D-DAY";
+  return diffDays > 0 ? `D-${diffDays}` : `D+${-diffDays}`;
+}
+
+/** D-7 이내(오늘 포함, 미래만)인지 — 강조색 적용 여부 판단용 */
+export function isDDaySoon(dateStr: string, refDateStr?: string): boolean {
+  const ref = refDateStr ? new Date(`${refDateStr}T00:00:00`) : new Date();
+  ref.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  const diffDays = Math.round((target.getTime() - ref.getTime()) / 86_400_000);
+  return diffDays >= 0 && diffDays <= 7;
+}
+
+// ---------- 알림 설정 ----------
+export type NotifyMode = "mute" | "vibrate" | "sound";
+const NOTIFY_MODE_KEY = "daily-planner-notify-mode";
+const NOTIFY_DAILY_KEY = "daily-planner-notify-daily";
+const NOTIFY_DAILY_LAST_FIRED_KEY = "daily-planner-notify-daily-last-fired";
+
+/** 뽀모도로 완료 등에 쓸 알림 방식. 기본값은 기존 동작(항상 소리)과 동일하게 "sound" */
+export function getNotifyMode(): NotifyMode {
+  const v = localStorage.getItem(NOTIFY_MODE_KEY);
+  return v === "mute" || v === "vibrate" || v === "sound" ? v : "sound";
+}
+
+export function setNotifyMode(mode: NotifyMode) {
+  localStorage.setItem(NOTIFY_MODE_KEY, mode);
+}
+
+export function getNotifyDaily(): boolean {
+  return localStorage.getItem(NOTIFY_DAILY_KEY) === "1";
+}
+
+export function setNotifyDaily(v: boolean) {
+  localStorage.setItem(NOTIFY_DAILY_KEY, v ? "1" : "0");
+}
+
+/** 저녁 회고 알림을 오늘 이미 보냈는지 (같은 날 중복 발송 방지) */
+export function wasDailyReflectionFiredToday(todayKey: string): boolean {
+  return localStorage.getItem(NOTIFY_DAILY_LAST_FIRED_KEY) === todayKey;
+}
+
+export function markDailyReflectionFired(todayKey: string) {
+  localStorage.setItem(NOTIFY_DAILY_LAST_FIRED_KEY, todayKey);
+}
+
+// ---------- 표시 설정 ----------
+const DARK_MODE_KEY = "daily-planner-dark-mode";
+
+/** 다크 모드 토글 상태만 저장 (실제 색 전환 적용은 이후 단계) */
+export function getDarkMode(): boolean {
+  return localStorage.getItem(DARK_MODE_KEY) === "1";
+}
+
+export function setDarkMode(v: boolean) {
+  localStorage.setItem(DARK_MODE_KEY, v ? "1" : "0");
+}
+
 // ---------- 테마 ----------
 export const P = {
   paper: "#F4F6F1",
@@ -616,16 +736,6 @@ export interface DayTaskStat {
   rate: number | null; // 그 날 할 일이 없으면 null
 }
 
-export interface DayMoodStat {
-  day: number;
-  mood: string | null;
-}
-
-export interface MoodCount {
-  mood: string;
-  count: number;
-}
-
 export interface HabitMonthStat {
   habit: Habit;
   rate: number; // 이번(조회 중인) 달 달성률(%)
@@ -642,9 +752,7 @@ export interface MonthStats {
   month: number;
   daysInMonth: number;
   taskByDay: DayTaskStat[];
-  moodByDay: DayMoodStat[];
-  moodCounts: MoodCount[];
-  recordedDays: number; // 무언가(할 일/일정/메모/기분)라도 기록된 날 수
+  recordedDays: number; // 무언가(할 일/일정/메모)라도 기록된 날 수
   totalTasks: number;
   totalDone: number;
   overallTaskRate: number; // 0~100
@@ -655,14 +763,12 @@ export interface MonthStats {
   totalBlockMinutes: number;
 }
 
-/** 해당 월의 할 일/무드/습관/시간표 데이터를 한 번에 집계 (읽기 전용, 저장 데이터는 수정하지 않음) */
+/** 해당 월의 할 일/습관/시간표 데이터를 한 번에 집계 (읽기 전용, 저장 데이터는 수정하지 않음) */
 export function getMonthStats(year: number, month: number): MonthStats {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const monthEndKey = dateKey(year, month, daysInMonth);
 
   const taskByDay: DayTaskStat[] = [];
-  const moodByDay: DayMoodStat[] = [];
-  const moodCountMap = new Map<string, number>();
   const hourMinutes = new Map<number, number>();
   let recordedDays = 0;
   let totalTasks = 0;
@@ -671,7 +777,7 @@ export function getMonthStats(year: number, month: number): MonthStats {
   for (let d = 1; d <= daysInMonth; d++) {
     const data = loadDay(dateKey(year, month, d));
     const hasData =
-      data.tasks.length > 0 || data.blocks.length > 0 || data.memo.trim() !== "" || !!data.mood;
+      data.tasks.length > 0 || data.blocks.length > 0 || data.memo.trim() !== "";
     if (hasData) recordedDays++;
 
     const done = data.tasks.filter((t) => t.done).length;
@@ -683,9 +789,6 @@ export function getMonthStats(year: number, month: number): MonthStats {
       done,
       rate: data.tasks.length ? Math.round((done / data.tasks.length) * 100) : null,
     });
-
-    moodByDay.push({ day: d, mood: data.mood ?? null });
-    if (data.mood) moodCountMap.set(data.mood, (moodCountMap.get(data.mood) ?? 0) + 1);
 
     for (const b of data.blocks) {
       const firstHour = Math.floor(b.start / 60);
@@ -699,10 +802,6 @@ export function getMonthStats(year: number, month: number): MonthStats {
       }
     }
   }
-
-  const moodCounts: MoodCount[] = MOODS
-    .map((mood) => ({ mood, count: moodCountMap.get(mood) ?? 0 }))
-    .filter((m) => m.count > 0);
 
   const habitStats: HabitMonthStat[] = loadHabits()
     .filter((h) => h.createdAt <= monthEndKey)
@@ -724,8 +823,6 @@ export function getMonthStats(year: number, month: number): MonthStats {
     month,
     daysInMonth,
     taskByDay,
-    moodByDay,
-    moodCounts,
     recordedDays,
     totalTasks,
     totalDone,

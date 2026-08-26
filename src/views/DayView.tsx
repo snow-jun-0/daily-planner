@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Block, DayData, HOURS, MOODS, P, PRIORITIES, Priority, BLOCK_COLORS,
+  Block, DayData, HOURS, P, PRIORITIES, Priority,
   DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay,
-  MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel,
+  minutesToLabel,
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
   assignLanes, LaneAssignment,
   habitsForDate, isHabitDone, setHabitDone, getStreak,
@@ -11,6 +11,8 @@ import {
   GEvent, hasGoogleConfig,
   listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent, eventUid,
 } from "../gcal";
+import GhostButton from "./GhostButton";
+import TimeBlockFormModal from "./TimeBlockFormModal";
 
 interface Props {
   year: number;
@@ -23,6 +25,9 @@ interface Props {
   onBack: () => void;
   onChangeDay: (y: number, m: number, d: number) => void;
   onStartFocus: (title: string) => void;
+  onTasksProgressChange?: (done: number, total: number) => void; // 상단 오늘 요약카드의 완료율 표시용
+  onOpenRecurring: () => void; // 반복 일정 모달 열기
+  onOpenTodos: () => void; // 전체 할 일 모달 열기
 }
 
 // ---------- 가로 시간표 격자 레이아웃 상수 ----------
@@ -42,6 +47,7 @@ const HL_INSET_Y = 4;
 
 export default function DayView({
   year, month, day, recurringVersion, habitsVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay, onStartFocus,
+  onTasksProgressChange, onOpenRecurring, onOpenTodos,
 }: Props) {
   const key = dateKey(year, month, day);
   const [data, setData] = useState<DayData>(() => loadDay(key));
@@ -49,10 +55,7 @@ export default function DayView({
 
   const [taskInput, setTaskInput] = useState("");
   const [taskPriority, setTaskPriority] = useState<Priority>("mid");
-  const [blockTitle, setBlockTitle] = useState("");
-  const [blockStart, setBlockStart] = useState(540); // 09:00
-  const [blockEnd, setBlockEnd] = useState(600); // 10:00
-  const [blockColor, setBlockColor] = useState(BLOCK_COLORS[0].color);
+  const [showBlockForm, setShowBlockForm] = useState(false);
   const [now, setNow] = useState(new Date());
   const memoRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -196,21 +199,12 @@ export default function DayView({
   const removeTask = (id: string) =>
     setData((p) => ({ ...p, tasks: p.tasks.filter((t) => t.id !== id) }));
 
-  const addBlock = () => {
-    const title = blockTitle.trim();
-    if (!title || blockEnd <= blockStart) return;
-    const nb: Block = { id: uid(), title, start: blockStart, end: blockEnd, color: blockColor };
+  const addBlock = (title: string, start: number, end: number, color: string) => {
+    const nb: Block = { id: uid(), title, start, end, color };
     setData((p) => ({ ...p, blocks: [...p.blocks, nb].sort((a, b) => a.start - b.start) }));
-    setBlockTitle("");
   };
   const removeBlock = (id: string) =>
     setData((p) => ({ ...p, blocks: p.blocks.filter((b) => b.id !== id) }));
-
-  const blockEndOptions = MINUTE_OPTIONS.filter((m) => m > blockStart);
-  const onBlockStartChange = (v: number) => {
-    setBlockStart(v);
-    setBlockEnd((prevEnd) => (prevEnd <= v ? v + 10 : prevEnd));
-  };
 
   // 오늘 해당하는 습관 (요일 매칭). habitTick(체크 시)·habitsVersion(습관 목록 변경 시)에 따라 다시 계산됨
   const todaysHabits = habitsForDate(key, dow);
@@ -221,6 +215,11 @@ export default function DayView({
 
   const doneCount = data.tasks.filter((t) => t.done).length;
   const progress = data.tasks.length ? Math.round((doneCount / data.tasks.length) * 100) : 0;
+
+  // 상단 오늘 요약카드(App)로 완료율 전달 — 이 날짜의 할 일이 바뀔 때마다 갱신
+  useEffect(() => {
+    onTasksProgressChange?.(doneCount, data.tasks.length);
+  }, [doneCount, data.tasks.length]);
 
   const inputStyle = { background: P.paper, border: `1px solid ${P.line}` };
 
@@ -285,29 +284,9 @@ export default function DayView({
         </div>
       </div>
 
-      {/* 오늘 기분 */}
-      <div className="flex items-center gap-1.5 sm:gap-2 mb-3 sm:mb-6 flex-wrap">
-        <span className="text-xs" style={{ color: P.faint }}>오늘 기분</span>
-        {MOODS.map((m) => (
-          <button
-            key={m}
-            onClick={() => setData((p) => ({ ...p, mood: p.mood === m ? undefined : m }))}
-            className={`mood-btn text-base sm:text-lg leading-none rounded-full w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center ${data.mood === m ? "on" : ""}`}
-            aria-label={`기분 ${m}`}
-            style={{
-              background: data.mood === m ? P.card : "transparent",
-              border: `1.5px solid ${data.mood === m ? P.green : "transparent"}`,
-              filter: data.mood && data.mood !== m ? "grayscale(1) opacity(.45)" : "none",
-            }}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
       {/* 오늘의 습관 — 등록된 습관이 없으면 섹션 자체를 숨김 */}
       {todaysHabits.length > 0 && (
-        <section className="rounded-xl p-4 mb-3 sm:mb-6" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+        <section className="card mb-3 sm:mb-6">
           <h2 className="text-base font-bold mb-3" style={{ fontFamily: "'Gowun Batang', serif" }}>
             오늘의 습관
           </h2>
@@ -346,61 +325,24 @@ export default function DayView({
 
       <div className="grid md:grid-cols-5 gap-6">
         {/* 시간표 — 오른쪽 할 일/메모보다 넓게 배치 */}
-        <section className="md:col-span-3 rounded-xl p-4" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+        <section className="card md:col-span-3">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h2 className="text-lg font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>시간표</h2>
-            {hasGoogleConfig() && gSignedIn && (
-              <button onClick={exportDayToGoogle} disabled={gBusy}
-                className="text-xs px-2.5 py-1 rounded-lg font-medium text-white"
-                style={{ background: P.green }}>
-                구글로 보내기
-              </button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              <GhostButton icon="+" label="추가" onClick={() => setShowBlockForm(true)} title="일정 추가" />
+              <GhostButton icon="🔁" label="반복" onClick={onOpenRecurring} title="매주 반복되는 고정 일정 관리" />
+              {hasGoogleConfig() && gSignedIn && (
+                <button onClick={exportDayToGoogle} disabled={gBusy}
+                  className="text-xs px-2.5 py-1 rounded-lg font-medium text-white"
+                  style={{ background: P.green }}>
+                  구글로 보내기
+                </button>
+              )}
+            </div>
           </div>
           {gMsg && (
             <p className="text-[11px] mb-2" style={{ color: P.faint }}>{gMsg}</p>
           )}
-
-          <div className="flex gap-2 mb-2 flex-wrap">
-            <input
-              value={blockTitle}
-              onChange={(e) => setBlockTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addBlock()}
-              placeholder="일정 이름"
-              className="flex-1 min-w-[7rem] px-3 py-2 rounded-lg text-sm"
-              style={inputStyle}
-            />
-            <select value={blockStart} onChange={(e) => onBlockStartChange(+e.target.value)}
-              className="px-2 py-2 rounded-lg text-sm" style={inputStyle}>
-              {START_MINUTE_OPTIONS.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
-            </select>
-            <span className="self-center text-sm" style={{ color: P.faint }}>→</span>
-            <select value={blockEnd} onChange={(e) => setBlockEnd(+e.target.value)}
-              className="px-2 py-2 rounded-lg text-sm" style={inputStyle}>
-              {blockEndOptions.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
-            </select>
-            <button onClick={addBlock} className="px-3 py-2 rounded-lg text-sm font-medium text-white" style={{ background: P.green }}>
-              추가
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs" style={{ color: P.faint }}>색상</span>
-            {BLOCK_COLORS.map((c) => (
-              <button
-                key={c.color}
-                onClick={() => setBlockColor(c.color)}
-                className="w-5 h-5 rounded-full transition-transform"
-                style={{
-                  background: c.color,
-                  transform: blockColor === c.color ? "scale(1.2)" : "scale(1)",
-                  boxShadow: blockColor === c.color ? `0 0 0 2px ${P.card}, 0 0 0 4px ${c.color}` : "none",
-                }}
-                aria-label={`색상 ${c.name}`}
-                title={c.name}
-              />
-            ))}
-          </div>
 
           <div className="rounded-lg" style={{ border: `1px solid ${P.line}`, overflowX: "auto" }}>
             <div style={{ minWidth: MIN_TIMETABLE_W }}>
@@ -573,15 +515,18 @@ export default function DayView({
 
         {/* 할 일 + 메모 — 슬림하게 */}
         <div className="md:col-span-2 flex flex-col gap-4">
-          <section className="relative rounded-xl p-4" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+          <section className="card relative">
             {data.tasks.length > 0 && progress === 100 && (
               <div className="stamp" aria-hidden="true">
                 <span>참 잘했어요</span>
               </div>
             )}
-            <h2 className="text-base font-bold mb-3" style={{ fontFamily: "'Gowun Batang', serif" }}>
-              할 일 <span className="text-xs font-normal" style={{ color: P.faint }}>({doneCount}/{data.tasks.length})</span>
-            </h2>
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <h2 className="text-base font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>
+                할 일 <span className="text-xs font-normal" style={{ color: P.faint }}>({doneCount}/{data.tasks.length})</span>
+              </h2>
+              <GhostButton icon="☰" label="전체" onClick={onOpenTodos} title="모든 날짜의 완료하지 않은 할 일 모아보기" />
+            </div>
 
             <div className="flex gap-2 mb-2">
               <input
@@ -649,7 +594,7 @@ export default function DayView({
             </ul>
           </section>
 
-          <section className="rounded-xl p-4" style={{ background: P.card, border: `1px solid ${P.line}` }}>
+          <section className="card">
             <h2 className="text-base font-bold mb-2" style={{ fontFamily: "'Gowun Batang', serif" }}>메모</h2>
             <textarea
               ref={memoRef}
@@ -669,6 +614,10 @@ export default function DayView({
           </section>
         </div>
       </div>
+
+      {showBlockForm && (
+        <TimeBlockFormModal onClose={() => setShowBlockForm(false)} onAdd={addBlock} />
+      )}
     </div>
   );
 }

@@ -1,11 +1,21 @@
 @import "tailwindcss";
 
+:root {
+  --paper: #F4F6F1;
+  --card: #FDFEFB;
+  --ink: #22302A;
+  --faint: #8A968E;
+  --line: #EDF1EC;
+  --green: #2F6B4F;
+  --sage: #9DB8A4;
+  --highlight: #F5D547;
+  --red: #C0392B;
+  --blue: #2C5AA0;
+}
+
 body {
-  /* 은은한 종이 질감: 미세 도트 + 상단에서 내려오는 빛 */
-  background:
-    radial-gradient(circle at 1px 1px, #22302A0A 1px, transparent 0) 0 0 / 22px 22px,
-    linear-gradient(180deg, #F7F9F3 0%, #F4F6F1 40%, #F0F3EC 100%);
-  color: #22302A;
+  background: var(--paper);
+  color: var(--ink);
   font-family: 'IBM Plex Sans KR', sans-serif;
   min-height: 100vh;
 }
@@ -13,6 +23,15 @@ body {
 /* 카드에 종이 두께감 */
 section, .paper-card {
   box-shadow: 0 1px 2px #22302A0D, 0 4px 14px #22302A08;
+}
+
+/* 공통 카드 스타일: 시간표/할 일/메모 등 모든 카드에 통일 적용 */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(33, 48, 41, 0.06);
+  padding: 16px;
 }
 
 /* 형광펜 스와이프 */
@@ -25,11 +44,6 @@ section, .paper-card {
   border-radius: 2px;
 }
 .hl-swipe.on { background-size: 100% 62%; }
-
-/* 기분 버튼 */
-.mood-btn { transition: transform .15s ease, filter .2s ease; }
-.mood-btn:hover { transform: scale(1.15); }
-.mood-btn.on { transform: scale(1.1); box-shadow: 0 2px 6px #2F6B4F33; }
 
 /* 참 잘했어요 도장 */
 .stamp {
@@ -71,7 +85,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hl-swipe, .mood-btn { transition: none; }
+  .hl-swipe { transition: none; }
   .stamp { animation: none; }
   * { transition-duration: 0s !important; }
 }

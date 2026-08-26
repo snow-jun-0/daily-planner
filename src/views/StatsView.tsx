@@ -1,19 +1,24 @@
 import { useMemo, useState } from "react";
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList,
-  PieChart, Pie,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
-import { MONTH_NAMES, DAY_NAMES, P, CHART_COLORS, getMonthStats, MonthStats } from "../lib";
+import { MONTH_NAMES, P, getMonthStats, MonthStats } from "../lib";
+import { getMonthPomodoroStats } from "../pomodoro";
+import GhostButton from "./GhostButton";
 
 interface Props {
   onBack: () => void;
+  onOpenHabits: () => void;
 }
 
-function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+const BLUE = "#2C5AA0";
+const ORANGE = "#D97706";
+
+function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
     <div className="paper-card rounded-2xl p-4" style={{ background: P.card, border: `1px solid ${P.line}` }}>
       <p className="text-xs mb-1" style={{ color: P.faint }}>{label}</p>
-      <p className="text-2xl sm:text-3xl font-bold" style={{ fontFamily: "'Gowun Batang', serif", color: P.green }}>
+      <p className="text-2xl sm:text-3xl font-bold" style={{ fontFamily: "'Gowun Batang', serif", color }}>
         {value}
       </p>
       {sub && <p className="text-[11px] mt-0.5" style={{ color: P.faint }}>{sub}</p>}
@@ -71,113 +76,38 @@ function TaskTrendChart({ stats }: { stats: MonthStats }) {
   );
 }
 
-function MoodHeatmap({ stats, year, month }: { stats: MonthStats; year: number; month: number }) {
-  const first = new Date(year, month, 1).getDay();
-  return (
-    <div>
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {DAY_NAMES.map((d, i) => (
-          <p key={d} className="text-center text-[10px] font-medium" style={{ color: i === 0 ? P.red : i === 6 ? "#2C5AA0" : P.faint }}>
-            {d}
-          </p>
-        ))}
+function HabitRateList({ stats, onOpenHabits }: { stats: MonthStats; onOpenHabits: () => void }) {
+  if (stats.habitStats.length === 0) {
+    return (
+      <div className="text-center py-6">
+        <p className="text-sm mb-3" style={{ color: P.faint }}>습관을 추가해보세요</p>
+        <button
+          onClick={onOpenHabits}
+          className="text-sm font-semibold px-4 py-2 rounded-lg text-white"
+          style={{ background: P.green }}
+        >
+          + 습관 추가
+        </button>
       </div>
-      <div className="grid grid-cols-7 gap-1">
-        {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
-        {stats.moodByDay.map(({ day, mood }) => (
-          <div
-            key={day}
-            title={mood ? `${day}일 ${mood}` : `${day}일`}
-            className="aspect-square rounded-lg flex items-center justify-center text-sm"
-            style={{
-              background: mood ? `${P.highlight}55` : P.paper,
-              border: `1px solid ${mood ? P.highlight : P.line}`,
-            }}
-          >
-            {mood ? <span>{mood}</span> : <span className="text-[9px]" style={{ color: P.faint }}>{day}</span>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MoodDonut({ stats }: { stats: MonthStats }) {
-  if (stats.moodCounts.length === 0) return <EmptyRow text="기분을 기록한 날이 아직 없어요" />;
+    );
+  }
   return (
-    <div className="flex flex-col sm:flex-row items-center gap-4">
-      <ResponsiveContainer width="100%" height={160} className="max-w-[160px] shrink-0">
-        <PieChart>
-          <Pie
-            data={stats.moodCounts}
-            dataKey="count"
-            nameKey="mood"
-            innerRadius={40}
-            outerRadius={70}
-            paddingAngle={2}
-            stroke="none"
-          >
-            {stats.moodCounts.map((_, i) => (
-              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip content={({ active, payload }) => {
-            if (!active || !payload?.length) return null;
-            const p = payload[0].payload as { mood: string; count: number };
-            return <TooltipBox>{p.mood} {p.count}일</TooltipBox>;
-          }} />
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="flex flex-wrap gap-1.5 justify-center sm:justify-start">
-        {stats.moodCounts.map((m, i) => (
-          <span
-            key={m.mood}
-            className="text-xs px-2 py-1 rounded-full flex items-center gap-1"
-            style={{ background: `${CHART_COLORS[i % CHART_COLORS.length]}22`, color: P.ink }}
-          >
-            <span>{m.mood}</span>
-            <span style={{ color: P.faint }}>{m.count}일</span>
+    <ul className="flex flex-col gap-3.5">
+      {stats.habitStats.map(({ habit, rate, streak }) => (
+        <li key={habit.id} className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate flex-1 min-w-0">
+            {habit.emoji ? `${habit.emoji} ` : ""}{habit.name}
           </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HabitBars({ stats }: { stats: MonthStats }) {
-  if (stats.habitStats.length === 0) return <EmptyRow text="이 달에 등록된 습관이 없어요" />;
-  const data = stats.habitStats.map((h) => ({
-    label: `${h.habit.emoji ?? ""} ${h.habit.name}`.trim(),
-    rate: h.rate,
-    streak: h.streak,
-    color: h.habit.color ?? P.green,
-  }));
-  const height = Math.max(80, data.length * 40 + 16);
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 36, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={P.line} horizontal={false} />
-        <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: P.faint }} tickLine={false} axisLine={{ stroke: P.line }} />
-        <YAxis type="category" dataKey="label" tick={{ fontSize: 12, fill: P.ink }} tickLine={false} axisLine={false} width={110} />
-        <Tooltip
-          cursor={{ fill: `${P.sage}22` }}
-          content={({ active, payload }) => {
-            if (!active || !payload?.length) return null;
-            const p = payload[0].payload as (typeof data)[number];
-            return <TooltipBox>{p.label} · 달성률 {p.rate}%{p.streak > 0 ? ` · 🔥${p.streak}` : ""}</TooltipBox>;
-          }}
-        />
-        <Bar dataKey="rate" radius={[0, 6, 6, 0]} barSize={16}>
-          {data.map((d, i) => <Cell key={i} fill={d.color} />)}
-          <LabelList
-            dataKey="rate"
-            position="right"
-            formatter={(v: unknown) => `${v ?? 0}%`}
-            style={{ fontSize: 11, fill: P.ink, fontWeight: 600 }}
-          />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+          {streak > 0 && (
+            <span className="text-xs font-semibold shrink-0" style={{ color: P.green }}>🔥{streak}</span>
+          )}
+          <span className="text-xs font-semibold shrink-0 w-9 text-right" style={{ color: P.ink }}>{rate}%</span>
+          <div className="shrink-0 h-2 rounded-full overflow-hidden" style={{ width: 80, background: P.paper }}>
+            <div className="h-full rounded-full" style={{ width: `${rate}%`, background: P.green }} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -208,12 +138,14 @@ function TimeOfDayChart({ stats }: { stats: MonthStats }) {
   );
 }
 
-export default function StatsView({ onBack }: Props) {
+export default function StatsView({ onBack, onOpenHabits }: Props) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
 
   const stats = useMemo(() => getMonthStats(year, month), [year, month]);
+  const pomodoroStats = useMemo(() => getMonthPomodoroStats(year, month), [year, month]);
+  const focusHours = Math.round((pomodoroStats.minutes / 60) * 10) / 10;
 
   const prev = () => {
     if (month === 0) { setYear(year - 1); setMonth(11); } else setMonth(month - 1);
@@ -222,22 +154,27 @@ export default function StatsView({ onBack }: Props) {
     if (month === 11) { setYear(year + 1); setMonth(0); } else setMonth(month + 1);
   };
 
-  const isEmpty = stats.recordedDays === 0 && stats.habitStats.every((h) => h.rate === 0 && h.streak === 0);
+  const isEmpty =
+    stats.recordedDays === 0 &&
+    pomodoroStats.count === 0 &&
+    stats.habitStats.every((h) => h.rate === 0 && h.streak === 0);
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <button onClick={onBack} className="text-sm px-3 py-1.5 rounded-lg" style={{ color: P.faint, border: `1px solid ${P.line}` }}>
           ‹ 달력으로
         </button>
-        <div className="flex items-center gap-5">
-          <button onClick={prev} className="text-2xl px-2" style={{ color: P.faint }} aria-label="이전 달">‹</button>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>
-            {year}년 <span style={{ color: P.green }}>{MONTH_NAMES[month]}</span> 통계
-          </h1>
-          <button onClick={next} className="text-2xl px-2" style={{ color: P.faint }} aria-label="다음 달">›</button>
-        </div>
-        <span className="w-20" />
+        <h1 className="text-2xl font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>통계</h1>
+        <GhostButton icon="🔥" label="습관 관리" onClick={onOpenHabits} title="습관 추가·수정·삭제" />
+      </div>
+
+      <div className="flex items-center justify-center gap-5 mb-6">
+        <button onClick={prev} className="text-2xl px-2" style={{ color: P.faint }} aria-label="이전 달">‹</button>
+        <span className="text-base font-semibold" style={{ fontFamily: "'Gowun Batang', serif" }}>
+          {year}년 <span style={{ color: P.green }}>{MONTH_NAMES[month]}</span>
+        </span>
+        <button onClick={next} className="text-2xl px-2" style={{ color: P.faint }} aria-label="다음 달">›</button>
       </div>
 
       {isEmpty ? (
@@ -249,27 +186,18 @@ export default function StatsView({ onBack }: Props) {
       ) : (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <SummaryCard label="할 일 완료율" value={`${stats.overallTaskRate}%`} sub={`${stats.totalDone}/${stats.totalTasks}건`} />
-            <SummaryCard label="습관 평균 달성률" value={`${stats.avgHabitRate}%`} sub={stats.habitStats.length ? `습관 ${stats.habitStats.length}개` : undefined} />
-            <SummaryCard label="기록한 날" value={`${stats.recordedDays}일`} sub={`/ ${stats.daysInMonth}일`} />
-            <SummaryCard label="최장 스트릭" value={`🔥${stats.longestHabitStreak}`} sub={stats.longestHabitStreak > 0 ? "일 연속" : undefined} />
+            <SummaryCard label="할 일 완료율" value={`${stats.overallTaskRate}%`} sub={`${stats.totalDone}/${stats.totalTasks}건`} color={P.green} />
+            <SummaryCard label="집중 시간" value={`${focusHours}h`} sub={pomodoroStats.count ? `뽀모도로 ${pomodoroStats.count}회` : undefined} color={BLUE} />
+            <SummaryCard label="기록한 날" value={`${stats.recordedDays}일`} sub={`/ ${stats.daysInMonth}일`} color={P.ink} />
+            <SummaryCard label="최장 스트릭" value={`🔥${stats.longestHabitStreak}`} sub={stats.longestHabitStreak > 0 ? "일 연속" : undefined} color={ORANGE} />
           </div>
 
           <SectionCard title="할 일 완료 추이" desc="날짜별 완료/미완료 개수">
             <TaskTrendChart stats={stats} />
           </SectionCard>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <SectionCard title="무드 캘린더" desc="날짜별 기록된 기분">
-              <MoodHeatmap stats={stats} year={year} month={month} />
-            </SectionCard>
-            <SectionCard title="무드 분포" desc="이 달 기분별 기록 일수">
-              <MoodDonut stats={stats} />
-            </SectionCard>
-          </div>
-
           <SectionCard title="습관 달성률" desc="습관별 이 달 달성률과 현재 스트릭">
-            <HabitBars stats={stats} />
+            <HabitRateList stats={stats} onOpenHabits={onOpenHabits} />
           </SectionCard>
 
           <SectionCard title="시간대별 활용도" desc="시간표에 등록된 일정이 몰린 시간대">

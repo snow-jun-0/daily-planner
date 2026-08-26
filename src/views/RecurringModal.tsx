@@ -119,22 +119,27 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
             </select>
           </div>
 
-          <div className="flex items-center gap-2 mb-3">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="flex-1 px-2 py-2 rounded-lg text-sm"
-              style={inputStyle}
-            />
-            <span className="text-sm" style={{ color: P.faint }}>→</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="flex-1 px-2 py-2 rounded-lg text-sm"
-              style={inputStyle}
-            />
+          <div className="flex flex-col gap-2 mb-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: P.faint }}>시작일</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full px-2 py-2 rounded-lg text-sm"
+                style={inputStyle}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: P.faint }}>종료일</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-2 py-2 rounded-lg text-sm"
+                style={inputStyle}
+              />
+            </label>
           </div>
 
           <div className="flex items-center gap-2 mb-3">

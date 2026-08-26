@@ -95,6 +95,11 @@ export function isSignedIn(): boolean {
   return getStoredToken() !== null;
 }
 
+/** 예전에 연결한 적은 있지만(로컬에 토큰 흔적 있음) 지금은 만료되어 무효인 상태인지 — "다시 연결하기" 문구용 */
+export function hasExpiredToken(): boolean {
+  return localStorage.getItem(TOKEN_KEY) !== null && getStoredToken() === null;
+}
+
 export function signOutGoogle() {
   const raw = localStorage.getItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_KEY);
@@ -349,6 +354,47 @@ export async function deleteEvent(eventId: string): Promise<void> {
   await apiFetch(`/calendars/primary/events/${encodeURIComponent(eventId)}`, {
     method: "DELETE",
   });
+}
+
+// ---------- D-Day ↔ 구글 캘린더 종일 이벤트 연동 ----------
+const DDAY_SOURCE = "daily-planner-dday";
+
+/** "YYYY-MM-DD"에 n일을 더한 날짜 문자열 (종일 이벤트의 end.date는 다음날/배타적 경계라 +1일에 사용) */
+function addDaysToDateStr(dateStr: string, n: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+}
+
+/** D-Day를 구글 캘린더(primary)에 종일 이벤트로 생성. plannerDDayId를 extendedProperties.private에 심어 역동기화 시 식별 */
+export async function createDDayEvent(dateStr: string, title: string, plannerDDayId: string): Promise<GEvent> {
+  const body = {
+    summary: title,
+    start: { date: dateStr },
+    end: { date: addDaysToDateStr(dateStr, 1) },
+    extendedProperties: {
+      private: { plannerDDayId, plannerSource: DDAY_SOURCE },
+    },
+  };
+  return apiFetch("/calendars/primary/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 이 앱이 만든 D-Day 종일 이벤트를 전부 조회 (날짜 범위 제한 없음, 다른 기기에서 만든 것도 포함 — 역동기화용) */
+export async function listDDayEvents(): Promise<GEvent[]> {
+  const params = new URLSearchParams({
+    privateExtendedProperty: `plannerSource=${DDAY_SOURCE}`,
+    singleEvents: "true",
+    maxResults: "2500",
+  });
+  const data = await apiFetch(`/calendars/primary/events?${params.toString()}`);
+  return (data?.items ?? []) as GEvent[];
 }
 
 /** 종일 일정인지 (start/end가 date만 있고 dateTime이 없음) */

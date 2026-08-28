@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay, allHabitsDoneForDate } from "../lib";
+import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay, allHabitsDoneForDate, minutesToLabel } from "../lib";
 import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent } from "../gcal";
 
 interface Props {
@@ -24,6 +24,18 @@ export default function MonthView({
   const days = new Date(year, month + 1, 0).getDate();
 
   const [gEvents, setGEvents] = useState<GEvent[]>([]);
+  // 날짜 클릭 1단계: 선택(미리보기), 2단계: 같은 날 재클릭 시 일간뷰 이동
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  // 달이 바뀌면 선택 해제
+  useEffect(() => {
+    setSelectedDay(null);
+  }, [year, month]);
+
+  const handleDayClick = (d: number) => {
+    if (selectedDay === d) onSelectDay(d);
+    else setSelectedDay(d);
+  };
 
   // 달이 바뀌거나 구글 로그인 상태가 바뀌면 그 달의 구글 일정을 한 번에 불러옴
   useEffect(() => {
@@ -116,6 +128,7 @@ export default function MonthView({
             const dow = (first + i) % 7;
             const isToday =
               today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
+            const isSelected = selectedDay === d;
             const has = marked.has(d);
             const data = has ? loadDay(dateKey(year, month, d)) : null;
             const remaining = data ? data.tasks.filter((t) => !t.done).length : 0;
@@ -135,12 +148,17 @@ export default function MonthView({
             return (
               <button
                 key={d}
-                onClick={() => onSelectDay(d)}
+                onClick={() => handleDayClick(d)}
+                aria-pressed={isSelected}
                 className="relative rounded-lg p-1 min-h-[2.6rem] sm:min-h-[3rem] flex flex-col items-center transition-transform hover:-translate-y-0.5"
                 style={{
-                  background: P.card,
-                  border: `1px solid ${isToday ? P.green : P.line}`,
-                  boxShadow: isToday ? `0 0 0 2px color-mix(in srgb, ${P.green} 20%, transparent)` : "none",
+                  background: isSelected ? `color-mix(in srgb, ${P.green} 12%, ${P.card})` : P.card,
+                  border: `1px solid ${isSelected || isToday ? P.green : P.line}`,
+                  boxShadow: isSelected
+                    ? `0 0 0 2px color-mix(in srgb, ${P.green} 45%, transparent)`
+                    : isToday
+                    ? `0 0 0 2px color-mix(in srgb, ${P.green} 20%, transparent)`
+                    : "none",
                 }}
               >
                 {habitDoneDays.has(d) && (
@@ -172,6 +190,55 @@ export default function MonthView({
           })}
         </div>
       </div>
+
+      {selectedDay != null && (() => {
+        const sData = loadDay(dateKey(year, month, selectedDay));
+        const sBlocks = [...sData.blocks].sort((a, b) => a.start - b.start);
+        const sTasks = sData.tasks.filter((t) => !t.done);
+        const sGEvents = (gEventsByDay.get(selectedDay) ?? [])
+          .slice()
+          .sort((a, b) => Number(isAllDayEvent(b)) - Number(isAllDayEvent(a)));
+        const isEmpty = sBlocks.length === 0 && sTasks.length === 0 && sGEvents.length === 0;
+        return (
+          <button
+            onClick={() => onSelectDay(selectedDay)}
+            className="card w-full text-left mt-3 transition-transform hover:-translate-y-0.5"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>
+                {month + 1}월 {selectedDay}일
+              </h2>
+              <span className="text-xs shrink-0" style={{ color: P.green }}>일간뷰 열기 ›</span>
+            </div>
+            {isEmpty ? (
+              <p className="text-sm py-1" style={{ color: P.faint }}>이 날은 아직 일정이 없어.</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {sBlocks.map((b) => (
+                  <li key={`b-${b.id}`} className="flex items-center gap-2 text-sm">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: b.color || P.sage }} aria-hidden="true" />
+                    <span className="shrink-0 text-xs" style={{ color: P.faint }}>{minutesToLabel(b.start)}</span>
+                    <span className="truncate" style={{ color: P.ink }}>{b.title}</span>
+                  </li>
+                ))}
+                {sGEvents.map((ev, i) => (
+                  <li key={`g-${i}`} className="flex items-center gap-2 text-sm">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#4285F4" }} aria-hidden="true" />
+                    <span className="shrink-0 text-xs" style={{ color: P.faint }}>{isAllDayEvent(ev) ? "종일" : "구글"}</span>
+                    <span className="truncate" style={{ color: P.ink }}>{ev.summary || "(제목 없음)"}</span>
+                  </li>
+                ))}
+                {sTasks.map((t) => (
+                  <li key={`t-${t.id}`} className="flex items-center gap-2 text-sm">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: P.highlight }} aria-hidden="true" />
+                    <span className="truncate" style={{ color: P.ink }}>{t.text}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </button>
+        );
+      })()}
     </div>
   );
 }

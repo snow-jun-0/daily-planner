@@ -13,6 +13,7 @@ import {
 } from "../gcal";
 import GhostButton from "./GhostButton";
 import TimeBlockFormModal from "./TimeBlockFormModal";
+import TaskFormModal from "./TaskFormModal";
 
 interface Props {
   year: number;
@@ -53,8 +54,7 @@ export default function DayView({
   const [data, setData] = useState<DayData>(() => loadDay(key));
   const [, setHabitTick] = useState(0); // 습관 체크 시 리렌더 트리거용 (기록 자체는 별도 저장소에 저장)
 
-  const [taskInput, setTaskInput] = useState("");
-  const [taskPriority, setTaskPriority] = useState<Priority>("mid");
+  const [showTaskForm, setShowTaskForm] = useState(false);
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [now, setNow] = useState(new Date());
   const memoRef = useRef<HTMLTextAreaElement | null>(null);
@@ -188,11 +188,10 @@ export default function DayView({
     onChangeDay(d.getFullYear(), d.getMonth(), d.getDate());
   };
 
-  const addTask = () => {
-    const text = taskInput.trim();
-    if (!text) return;
-    setData((p) => ({ ...p, tasks: [...p.tasks, { id: uid(), text, done: false, priority: taskPriority }] }));
-    setTaskInput("");
+  const addTask = (text: string, priority: Priority) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setData((p) => ({ ...p, tasks: [...p.tasks, { id: uid(), text: trimmed, done: false, priority }] }));
   };
   const toggleTask = (id: string) =>
     setData((p) => ({ ...p, tasks: p.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) }));
@@ -525,41 +524,16 @@ export default function DayView({
               <h2 className="text-base font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>
                 할 일 <span className="text-xs font-normal" style={{ color: P.faint }}>({doneCount}/{data.tasks.length})</span>
               </h2>
-              <GhostButton icon="☰" label="전체" onClick={onOpenTodos} title="모든 날짜의 완료하지 않은 할 일 모아보기" />
-            </div>
-
-            <div className="flex gap-2 mb-2">
-              <input
-                value={taskInput}
-                onChange={(e) => setTaskInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addTask()}
-                placeholder="할 일 입력 후 Enter"
-                className="flex-1 px-3 py-2 rounded-lg text-sm"
-                style={inputStyle}
-              />
-              <button onClick={addTask} className="px-3 py-2 rounded-lg text-sm font-medium text-white" style={{ background: P.green }}>
-                추가
-              </button>
-            </div>
-
-            <div className="flex gap-1.5 mb-3">
-              {PRIORITIES.map((p) => (
-                <button key={p.id} onClick={() => setTaskPriority(p.id)}
-                  className="px-2.5 py-1 rounded-full text-xs font-medium"
-                  style={{
-                    background: taskPriority === p.id ? p.bg : "transparent",
-                    color: taskPriority === p.id ? p.color : P.faint,
-                    border: `1px solid ${taskPriority === p.id ? p.color : P.line}`,
-                  }}>
-                  {p.label}
-                </button>
-              ))}
+              <div className="flex items-center gap-2 shrink-0">
+                <GhostButton icon="☰" label="전체" onClick={onOpenTodos} title="모든 날짜의 완료하지 않은 할 일 모아보기" />
+                <GhostButton icon="+" label="추가" onClick={() => setShowTaskForm(true)} title="할 일 추가" />
+              </div>
             </div>
 
             <ul className="flex flex-col gap-1">
               {data.tasks.length === 0 && (
                 <li className="text-sm py-4 text-center" style={{ color: P.faint }}>
-                  아직 할 일이 없어. 위에서 추가해봐.
+                  아직 할 일이 없어. "+ 추가"로 만들어봐.
                 </li>
               )}
               {data.tasks.map((t) => {
@@ -617,6 +591,9 @@ export default function DayView({
 
       {showBlockForm && (
         <TimeBlockFormModal onClose={() => setShowBlockForm(false)} onAdd={addBlock} />
+      )}
+      {showTaskForm && (
+        <TaskFormModal onClose={() => setShowTaskForm(false)} onAdd={addTask} />
       )}
     </div>
   );

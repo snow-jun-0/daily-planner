@@ -218,10 +218,28 @@ export function allIncompleteTasks(): { date: string; task: Task }[] {
   return result;
 }
 
+/** 모든 날짜의 할 일을 날짜 오름차순으로 반환 (전체 할 일 모아보기용, 완료 포함) */
+export function allTasks(): { date: string; task: Task }[] {
+  const store = loadStore();
+  const result: { date: string; task: Task }[] = [];
+  for (const k of Object.keys(store).sort()) {
+    for (const t of store[k].tasks) {
+      result.push({ date: k, task: t });
+    }
+  }
+  return result;
+}
+
 /** 특정 날짜의 할 일을 완료 처리 */
 export function markTaskDone(key: string, taskId: string) {
   const day = loadDay(key);
   saveDay(key, { ...day, tasks: day.tasks.map((t) => (t.id === taskId ? { ...t, done: true } : t)) });
+}
+
+/** 특정 날짜의 할 일 완료 여부를 명시적으로 설정 (전체 할 일 화면에서 토글용) */
+export function setTaskDone(key: string, taskId: string, done: boolean) {
+  const day = loadDay(key);
+  saveDay(key, { ...day, tasks: day.tasks.map((t) => (t.id === taskId ? { ...t, done } : t)) });
 }
 
 /** 메모가 있는 모든 날짜를 날짜 오름차순으로 반환 (메모 전체보기용) */

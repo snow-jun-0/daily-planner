@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay, allHabitsDoneForDate } from "../lib";
-import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent, eventUid } from "../gcal";
+import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent } from "../gcal";
 
 interface Props {
   year: number;
@@ -11,11 +11,12 @@ interface Props {
   onSelectDay: (d: number) => void;
   onChangeMonth: (y: number, m: number) => void;
   onBackToYear: () => void;
+  onOpenYearPicker: () => void;
   onOpenStats: () => void;
 }
 
 export default function MonthView({
-  year, month, habitsVersion, gSignedIn, onGSignedInChange, onSelectDay, onChangeMonth, onBackToYear, onOpenStats,
+  year, month, habitsVersion, gSignedIn, onGSignedInChange, onSelectDay, onChangeMonth, onBackToYear, onOpenYearPicker, onOpenStats,
 }: Props) {
   const today = new Date();
   const marked = useMemo(() => daysWithData(year, month), [year, month]);
@@ -79,7 +80,7 @@ export default function MonthView({
         <div className="flex items-center gap-2">
           <button onClick={prev} className="flex items-center justify-center text-xl leading-none w-7 h-7 shrink-0" style={{ color: P.faint }} aria-label="이전 달">‹</button>
           <h1 className="flex items-center gap-1.5 font-bold leading-none" style={{ fontFamily: "'Gowun Batang', serif", fontSize: 22 }}>
-            <button onClick={onBackToYear} className="flex items-center gap-0.5 leading-none" style={{ color: P.ink }} aria-label="연도 선택">
+            <button onClick={onOpenYearPicker} className="flex items-center gap-0.5 leading-none" style={{ color: P.ink }} aria-label="연도 선택">
               {year}년
               <span className="leading-none" style={{ fontSize: 14, color: P.faint, fontFamily: "sans-serif" }}>▾</span>
             </button>
@@ -90,7 +91,7 @@ export default function MonthView({
           </h1>
           <button onClick={next} className="flex items-center justify-center text-xl leading-none w-7 h-7 shrink-0" style={{ color: P.faint }} aria-label="다음 달">›</button>
         </div>
-        <button onClick={onOpenStats} className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ color: P.faint, border: `1px solid ${P.line}` }}
+        <button onClick={onOpenStats} className="flex items-center justify-center w-7 h-7 rounded-md shrink-0" style={{ color: P.faint, border: `1px solid ${P.line}`, fontSize: 13 }}
           aria-label="통계" title="완료율·습관·시간표 통계 보기">
           📊
         </button>
@@ -100,7 +101,7 @@ export default function MonthView({
         <div className="grid grid-cols-7 gap-1.5 mb-1.5">
           {DAY_NAMES.map((d, i) => (
             <p key={d} className="text-center text-xs font-medium py-1"
-              style={{ color: i === 0 ? P.red : i === 6 ? "#2C5AA0" : P.faint }}>
+              style={{ color: i === 0 ? P.red : i === 6 ? P.blue : P.faint }}>
               {d}
             </p>
           ))}
@@ -122,20 +123,29 @@ export default function MonthView({
               .slice()
               .sort((a, b) => Number(isAllDayEvent(b)) - Number(isAllDayEvent(a)));
 
+            // 일정 표시: 제목 텍스트 없이 색점만 (블록 → 남은 할 일 → 구글 일정 순, 최대 3개)
+            const dotColors: string[] = [];
+            if (data) {
+              for (const b of data.blocks) dotColors.push(b.color || P.sage);
+              if (remaining > 0) dotColors.push(P.highlight);
+            }
+            for (let k = 0; k < dayGEvents.length; k++) dotColors.push("#4285F4");
+            const dots = dotColors.slice(0, 3);
+
             return (
               <button
                 key={d}
                 onClick={() => onSelectDay(d)}
-                className="relative rounded-xl p-2 min-h-[4.5rem] sm:min-h-[5.5rem] text-left flex flex-col transition-transform hover:-translate-y-0.5"
+                className="relative rounded-lg p-1 min-h-[2.6rem] sm:min-h-[3rem] flex flex-col items-center transition-transform hover:-translate-y-0.5"
                 style={{
                   background: P.card,
                   border: `1px solid ${isToday ? P.green : P.line}`,
-                  boxShadow: isToday ? `0 0 0 2px ${P.green}33` : "none",
+                  boxShadow: isToday ? `0 0 0 2px color-mix(in srgb, ${P.green} 20%, transparent)` : "none",
                 }}
               >
                 {habitDoneDays.has(d) && (
                   <span
-                    className="absolute bottom-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
+                    className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full"
                     style={{ background: P.green }}
                     title="습관 모두 완료"
                     aria-hidden="true"
@@ -145,40 +155,16 @@ export default function MonthView({
                   className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full"
                   style={{
                     background: isToday ? P.green : "transparent",
-                    color: isToday ? "#fff" : dow === 0 ? P.red : dow === 6 ? "#2C5AA0" : P.ink,
+                    color: isToday ? "#fff" : dow === 0 ? P.red : dow === 6 ? P.blue : P.ink,
                   }}
                 >
                   {d}
                 </span>
-                {data && (
-                  <div className="mt-1 flex flex-col gap-0.5 overflow-hidden">
-                    {data.blocks.slice(0, 2).map((b) => (
-                      <span key={b.id} className="text-[9px] truncate px-1 rounded"
-                        style={{ background: `${P.sage}44`, color: P.ink }}>
-                        {b.title}
-                      </span>
+                {dots.length > 0 && (
+                  <div className="mt-0.5 flex items-center justify-center gap-0.5">
+                    {dots.map((c, di) => (
+                      <span key={di} className="w-1 h-1 rounded-full shrink-0" style={{ background: c }} aria-hidden="true" />
                     ))}
-                    {remaining > 0 && (
-                      <span className="text-[9px] px-1 rounded" style={{ background: `${P.highlight}66` }}>
-                        할 일 {remaining}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {dayGEvents.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-0.5 overflow-hidden">
-                    {dayGEvents.slice(0, 2).map((ev) => (
-                      <span key={eventUid(ev)} className="text-[9px] truncate px-1 rounded flex items-center gap-0.5"
-                        style={{ background: "#4285F42E", color: "#4285F4" }}>
-                        <span className="shrink-0" style={{ fontSize: 6 }}>●</span>
-                        {ev.summary || "(제목 없음)"}
-                      </span>
-                    ))}
-                    {dayGEvents.length > 2 && (
-                      <span className="text-[9px] px-1" style={{ color: "#4285F4" }}>
-                        +{dayGEvents.length - 2}
-                      </span>
-                    )}
                   </div>
                 )}
               </button>

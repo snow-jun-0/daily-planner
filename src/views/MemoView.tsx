@@ -103,7 +103,7 @@ export default function MemoView({ onSelectDate }: Props) {
                   {date === todayKey && (
                     <span
                       className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0"
-                      style={{ background: `${P.highlight}55`, color: "#7A6100" }}
+                      style={{ background: `color-mix(in srgb, ${P.highlight} 33%, transparent)`, color: "var(--highlight-ink)" }}
                     >
                       오늘
                     </span>

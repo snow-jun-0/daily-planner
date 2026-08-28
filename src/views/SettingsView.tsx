@@ -3,7 +3,7 @@ import {
   P, NotifyMode,
   getNotifyMode, setNotifyMode as persistNotifyMode,
   getNotifyDaily, setNotifyDaily as persistNotifyDaily,
-  getDarkMode, setDarkMode as persistDarkMode,
+  getDarkMode, setDarkMode as persistDarkMode, applyDarkMode,
   resetAllData, TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToLabel,
 } from "../lib";
 import { hasGoogleConfig } from "../gcal";
@@ -94,7 +94,7 @@ function IconChip({ children, danger }: { children: React.ReactNode; danger?: bo
   return (
     <span
       className="shrink-0 flex items-center justify-center"
-      style={{ width: 30, height: 30, borderRadius: 9, background: danger ? "#FBEAE7" : P.paper }}
+      style={{ width: 30, height: 30, borderRadius: 9, background: danger ? "var(--tint-red)" : P.paper }}
     >
       {children}
     </span>
@@ -172,9 +172,9 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 function Badge({ tone, children }: { tone: "on" | "off" | "warn"; children: string }) {
   const styles = {
-    on: { background: "#E8F1EB", color: P.green },
+    on: { background: "var(--tint-green)", color: P.green },
     off: { background: P.paper, color: P.faint },
-    warn: { background: "#FBEAE7", color: P.red },
+    warn: { background: "var(--tint-red)", color: P.red },
   }[tone];
   return (
     <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={styles}>{children}</span>
@@ -219,6 +219,7 @@ export default function SettingsView({
   const changeDarkMode = (v: boolean) => {
     setDarkModeState(v);
     persistDarkMode(v);
+    applyDarkMode(v);
   };
 
   const handleResetData = () => {
@@ -303,7 +304,7 @@ export default function SettingsView({
             last
             icon={<MoonIcon />}
             title="다크 모드"
-            subtitle="화면 배색을 어둡게 (곧 적용 예정)"
+            subtitle="화면 배색을 어둡게"
             right={<Toggle checked={darkMode} onChange={changeDarkMode} label="다크 모드" />}
           />
         </div>

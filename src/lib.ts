@@ -37,9 +37,9 @@ export interface DayData {
 export const EMPTY_DAY: DayData = { tasks: [], blocks: [], memo: "" };
 
 export const PRIORITIES: { id: Priority; label: string; color: string; bg: string }[] = [
-  { id: "high", label: "중요", color: "#C0392B", bg: "#FBEAE7" },
-  { id: "mid", label: "보통", color: "#2F6B4F", bg: "#E8F1EB" },
-  { id: "low", label: "여유", color: "#8A968E", bg: "#EFF2EE" },
+  { id: "high", label: "중요", color: "var(--pri-high)", bg: "var(--tint-red)" },
+  { id: "mid", label: "보통", color: "var(--pri-mid)", bg: "var(--tint-green)" },
+  { id: "low", label: "여유", color: "var(--pri-low)", bg: "var(--tint-gray)" },
 ];
 
 export const HOURS = Array.from({ length: 18 }, (_, i) => i + 6); // 06~23 (그리드 눈금용)
@@ -647,6 +647,23 @@ export function getDDayCount(dateStr: string, refDateStr?: string): string {
   return diffDays > 0 ? `D-${diffDays}` : `D+${-diffDays}`;
 }
 
+/** D-Day 날짜가 기준일(기본: 오늘)보다 이전이면 true — 오늘(D-DAY)은 아직 유효하므로 false */
+export function isDDayPast(dateStr: string, refDateStr?: string): boolean {
+  const ref = refDateStr ? new Date(`${refDateStr}T00:00:00`) : new Date();
+  ref.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  const diffDays = Math.round((target.getTime() - ref.getTime()) / 86_400_000);
+  return diffDays < 0;
+}
+
+/**
+ * 화면 표시용 D-Day 목록 — 이미 지난(어제 이전) D-Day는 제외한다.
+ * 저장된 데이터(로컬/구글)는 그대로 두고 표시 시점에만 필터링한다.
+ */
+export function loadVisibleDDays(refDateStr?: string): DDay[] {
+  return loadDDays().filter((d) => !isDDayPast(d.date, refDateStr));
+}
+
 /** D-7 이내(오늘 포함, 미래만)인지 — 강조색 적용 여부 판단용 */
 export function isDDaySoon(dateStr: string, refDateStr?: string): boolean {
   const ref = refDateStr ? new Date(`${refDateStr}T00:00:00`) : new Date();
@@ -692,7 +709,7 @@ export function markDailyReflectionFired(todayKey: string) {
 // ---------- 표시 설정 ----------
 const DARK_MODE_KEY = "daily-planner-dark-mode";
 
-/** 다크 모드 토글 상태만 저장 (실제 색 전환 적용은 이후 단계) */
+/** 다크 모드 토글 상태 (localStorage) */
 export function getDarkMode(): boolean {
   return localStorage.getItem(DARK_MODE_KEY) === "1";
 }
@@ -701,22 +718,31 @@ export function setDarkMode(v: boolean) {
   localStorage.setItem(DARK_MODE_KEY, v ? "1" : "0");
 }
 
+/** html 요소에 .dark 클래스를 붙였다 뗐다 해서 실제 색 전환을 적용 (CSS 변수 재정의는 index.css) */
+export function applyDarkMode(v: boolean) {
+  document.documentElement.classList.toggle("dark", v);
+}
+
 // ---------- 테마 ----------
+// 실제 색값은 index.css의 CSS 변수(:root / html.dark)에서 정의한다.
+// 여기서는 변수 참조만 노출해, 인라인 style로 색을 쓰는 곳도 다크 모드에서 함께 전환되게 한다.
 export const P = {
-  paper: "#F4F6F1",
-  card: "#FDFEFB",
-  ink: "#22302A",
-  faint: "#8A968E",
-  line: "#DDE4DC",
-  green: "#2F6B4F",
-  sage: "#9DB8A4",
-  highlight: "#F5D547",
-  red: "#C0392B",
+  paper: "var(--paper)",
+  card: "var(--card)",
+  ink: "var(--ink)",
+  faint: "var(--faint)",
+  line: "var(--divider)",
+  green: "var(--green)",
+  sage: "var(--sage)",
+  highlight: "var(--highlight)",
+  red: "var(--red)",
+  blue: "var(--blue)",
+  orange: "var(--orange)",
 };
 
 // ---------- 통계 집계 ----------
 /** 통계 차트용 색상 팔레트 (P 팔레트 기반) */
-export const CHART_COLORS = [P.green, P.highlight, "#2C5AA0", P.red, "#7D3C98", P.sage];
+export const CHART_COLORS = [P.green, P.highlight, P.blue, P.red, "#7D3C98", P.sage];
 
 /** 특정 습관의 해당 월(1일~말일, 미래는 오늘까지) 달성률(%) */
 export function getHabitMonthRate(habitId: string, year: number, month: number): number {

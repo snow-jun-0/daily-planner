@@ -21,7 +21,7 @@ function MiniMonth({ year, month, onClick }: { year: number; month: number; onCl
       style={{
         background: P.card,
         border: `1px solid ${isThisMonth ? P.green : P.line}`,
-        boxShadow: isThisMonth ? `0 0 0 2px ${P.green}33` : "none",
+        boxShadow: isThisMonth ? `0 0 0 2px color-mix(in srgb, ${P.green} 20%, transparent)` : "none",
       }}
     >
       <p
@@ -47,7 +47,7 @@ function MiniMonth({ year, month, onClick }: { year: number; month: number; onCl
               key={d}
               className="text-[9px] text-center rounded-full leading-4"
               style={{
-                background: isToday ? P.green : marked.has(d) ? `${P.highlight}88` : "transparent",
+                background: isToday ? P.green : marked.has(d) ? `color-mix(in srgb, ${P.highlight} 53%, transparent)` : "transparent",
                 color: isToday ? "#fff" : P.ink,
                 fontWeight: isToday || marked.has(d) ? 600 : 400,
               }}

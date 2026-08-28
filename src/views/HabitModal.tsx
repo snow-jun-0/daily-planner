@@ -95,7 +95,7 @@ export default function HabitModal({ onClose, onChanged }: Props) {
                 className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
                 style={{
                   background: days.includes(i) ? P.green : "transparent",
-                  color: days.includes(i) ? "#fff" : (i === 0 ? P.red : i === 6 ? "#2C5AA0" : P.faint),
+                  color: days.includes(i) ? "#fff" : (i === 0 ? P.red : i === 6 ? P.blue : P.faint),
                   border: `1px solid ${days.includes(i) ? P.green : P.line}`,
                 }}
               >

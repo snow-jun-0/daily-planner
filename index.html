@@ -10,6 +10,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>데일리 플래너</title>
+    <script>
+      // 번들 로드 전에 다크 모드를 적용해 흰 화면 깜빡임 방지
+      try {
+        if (localStorage.getItem("daily-planner-dark-mode") === "1") {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

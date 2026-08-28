@@ -11,8 +11,8 @@ interface Props {
   onOpenHabits: () => void;
 }
 
-const BLUE = "#2C5AA0";
-const ORANGE = "#D97706";
+const BLUE = "var(--blue)";
+const ORANGE = "var(--orange)";
 
 function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
@@ -58,7 +58,7 @@ function TaskTrendChart({ stats }: { stats: MonthStats }) {
         <XAxis dataKey="day" tick={{ fontSize: 10, fill: P.faint }} interval={data.length > 20 ? 2 : 1} tickLine={false} axisLine={{ stroke: P.line }} />
         <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: P.faint }} tickLine={false} axisLine={false} width={28} />
         <Tooltip
-          cursor={{ fill: `${P.sage}22` }}
+          cursor={{ fill: "var(--chart-cursor)" }}
           content={({ active, payload, label }) => {
             if (!active || !payload?.length) return null;
             const p = payload[0].payload as (typeof data)[number];
@@ -70,7 +70,7 @@ function TaskTrendChart({ stats }: { stats: MonthStats }) {
           }}
         />
         <Bar dataKey="done" stackId="t" name="완료" fill={P.green} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="remaining" stackId="t" name="미완료" fill={`${P.faint}55`} radius={[3, 3, 0, 0]} />
+        <Bar dataKey="remaining" stackId="t" name="미완료" fill="var(--chart-bar-remaining)" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -124,7 +124,7 @@ function TimeOfDayChart({ stats }: { stats: MonthStats }) {
           <XAxis dataKey="hour" tickFormatter={(h) => `${h}시`} tick={{ fontSize: 10, fill: P.faint }} interval={1} tickLine={false} axisLine={{ stroke: P.line }} />
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: P.faint }} tickLine={false} axisLine={false} width={28} />
           <Tooltip
-            cursor={{ fill: `${P.sage}22` }}
+            cursor={{ fill: "var(--chart-cursor)" }}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               const p = payload[0].payload as (typeof data)[number];

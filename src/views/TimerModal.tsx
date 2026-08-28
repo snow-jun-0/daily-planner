@@ -25,7 +25,7 @@ function ProgressRing({ progress, bodyColor }: { progress: number; bodyColor: st
 
   return (
     <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full h-full -rotate-90">
-      <circle cx={CX} cy={CY} r={RADIUS} fill="none" stroke="#EDF1EC" strokeWidth={STROKE} />
+      <circle cx={CX} cy={CY} r={RADIUS} fill="none" stroke="var(--line)" strokeWidth={STROKE} />
       <circle
         cx={CX} cy={CY} r={RADIUS} fill="none" stroke={bodyColor} strokeWidth={STROKE} strokeLinecap="round"
         strokeDasharray={CIRC} strokeDashoffset={offset}
@@ -92,14 +92,14 @@ export default function TimerModal({ api, onClose }: Props) {
         </div>
 
         {justCompleted && (
-          <div className="text-xs text-center mb-3 px-3 py-2 rounded-lg font-medium" style={{ background: `${ringColor}22`, color: ringColor }}>
+          <div className="text-xs text-center mb-3 px-3 py-2 rounded-lg font-medium" style={{ background: `color-mix(in srgb, ${ringColor} 14%, transparent)`, color: ringColor }}>
             {justCompleted.phase === "focus" ? "집중 끝! 잠깐 쉬어가자 🎉" : "휴식 끝! 다시 집중해볼까?"}
           </div>
         )}
 
         {/* 상태 알약 + 연동된 일정 이름 */}
         <div className="flex justify-center mb-1">
-          <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: `${ringColor}22`, color: ringColor }}>
+          <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: `color-mix(in srgb, ${ringColor} 14%, transparent)`, color: ringColor }}>
             {phaseLabel}
           </span>
         </div>

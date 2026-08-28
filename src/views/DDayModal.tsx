@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { P, DDay, loadDDays, removeDDay, getDDayCount, isDDaySoon } from "../lib";
+import { P, DDay, loadVisibleDDays, removeDDay, getDDayCount, isDDaySoon } from "../lib";
 import { hasGoogleConfig, deleteEvent } from "../gcal";
 import DDayFormModal from "./DDayFormModal";
 
@@ -13,11 +13,12 @@ interface Props {
 const NEAR_COLOR = "#E8724C";
 
 export default function DDayModal({ gSignedIn, onGSignedInChange, onClose, onChanged }: Props) {
-  const [list, setList] = useState<DDay[]>(() => loadDDays());
+  // 지난 D-Day는 목록에서 숨긴다(표시용 필터) — 삭제·구글연동은 원본 데이터 기준으로 계속 동작
+  const [list, setList] = useState<DDay[]>(() => loadVisibleDDays());
   const [showForm, setShowForm] = useState(false);
 
   const refresh = () => {
-    setList(loadDDays());
+    setList(loadVisibleDDays());
     onChanged();
   };
 

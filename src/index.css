@@ -1,16 +1,67 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
+
   --paper: #F4F6F1;
   --card: #FDFEFB;
   --ink: #22302A;
   --faint: #8A968E;
-  --line: #EDF1EC;
+  --line: #EDF1EC;      /* .card 등 아주 옅은 구분선 */
+  --divider: #DDE4DC;   /* 인라인 스타일에서 쓰던 P.line (조금 더 진한 구분선) */
   --green: #2F6B4F;
   --sage: #9DB8A4;
   --highlight: #F5D547;
+  --highlight-ink: #7A6100; /* 노란 하이라이트 배지 위 텍스트 */
   --red: #C0392B;
   --blue: #2C5AA0;
+  --orange: #D97706;
+  --grid-line: #2A332E; /* 시간표 시(hour) 구분 진한 실선 */
+
+  /* 옅은 틴트 배경 (우선순위 칩, 상태 배지 등) */
+  --tint-green: #E8F1EB;
+  --tint-red: #FBEAE7;
+  --tint-gray: #EFF2EE;
+
+  /* 우선순위 칩 */
+  --pri-high: #C0392B;
+  --pri-mid: #2F6B4F;
+  --pri-low: #8A968E;
+
+  /* 차트(recharts) 반투명 색 — SVG 속성에서 color-mix 호환 이슈를 피하려고 rgba로 직접 정의 */
+  --chart-cursor: rgba(157, 184, 164, 0.16);
+  --chart-bar-remaining: rgba(138, 150, 142, 0.33);
+}
+
+/* ---------- 다크 모드 (html.dark) — 초록 테마 유지, 눈에 편한 어두운 배색 ---------- */
+html.dark {
+  color-scheme: dark;
+
+  --paper: #171C19;
+  --card: #232A26;
+  --ink: #E8ECEA;
+  --faint: #9AA5A0;
+  --line: #2E3833;
+  --divider: #313B36;
+  --green: #4A9370;
+  --sage: #6F8C7A;
+  --highlight: #E7C24A;
+  --highlight-ink: #F0D98A;
+  --red: #E0695C;
+  --blue: #6FA3D6;
+  --orange: #E0913A;
+  --grid-line: #3C4842;
+
+  --tint-green: #1E3329;
+  --tint-red: #3A2523;
+  --tint-gray: #262D29;
+
+  --pri-high: #E0695C;
+  --pri-mid: #4A9370;
+  --pri-low: #9AA5A0;
+
+  --chart-cursor: rgba(111, 140, 122, 0.22);
+  --chart-bar-remaining: rgba(154, 165, 160, 0.28);
 }
 
 body {
@@ -34,9 +85,22 @@ section, .paper-card {
   padding: 16px;
 }
 
+/* 다크 모드에서는 옅은 초록 그림자가 안 보이므로 검정 그림자로 교체 */
+html.dark section,
+html.dark .paper-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+html.dark .card {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
 /* 형광펜 스와이프 */
 .hl-swipe {
-  background-image: linear-gradient(120deg, #F5D54766 0%, #F5D547AA 100%);
+  background-image: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--highlight) 40%, transparent) 0%,
+    color-mix(in srgb, var(--highlight) 67%, transparent) 100%
+  );
   background-repeat: no-repeat;
   background-size: 0% 62%;
   background-position: 0 68%;
@@ -52,12 +116,12 @@ section, .paper-card {
   right: 14px;
   width: 84px;
   height: 84px;
-  border: 3px solid #C0392B;
+  border: 3px solid var(--red);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #C0392B;
+  color: var(--red);
   font-family: 'Gowun Batang', serif;
   font-weight: 700;
   font-size: 15px;
@@ -80,7 +144,7 @@ section, .paper-card {
 }
 
 input:focus, textarea:focus, select:focus {
-  outline: 2px solid #2F6B4F55;
+  outline: 2px solid color-mix(in srgb, var(--green) 33%, transparent);
   outline-offset: 1px;
 }
 

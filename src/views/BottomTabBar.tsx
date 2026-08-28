@@ -1,6 +1,6 @@
-const ACTIVE_COLOR = "#2F6B4F";
-const INACTIVE_COLOR = "#9AA5A0";
-const ACTIVE_PILL_BG = "#E8F1EB";
+const ACTIVE_COLOR = "var(--green)";
+const INACTIVE_COLOR = "#9AA5A0"; // 라이트·다크 모두에서 무난한 중간 회색
+const ACTIVE_PILL_BG = "var(--tint-green)";
 
 const ICON_PROPS = {
   width: 22,
@@ -71,7 +71,7 @@ const TABS: { key: TabKey; label: string; Icon: (p: { color: string }) => JSX.El
 ];
 
 interface Props {
-  activeTab: TabKey;
+  activeTab: TabKey | null; // null = 어느 탭도 활성 아님 (예: 통계 화면)
   onSelect: (action: TabAction) => void;
 }
 
@@ -80,8 +80,9 @@ export default function BottomTabBar({ activeTab, onSelect }: Props) {
     <nav
       className="fixed inset-x-0 bottom-0 z-50"
       style={{
-        background: "#FFFFFF",
+        background: "var(--card)",
         boxShadow: "0 -3px 16px rgba(33,48,41,0.08)",
+        borderTop: "1px solid var(--line)",
         paddingTop: 10,
         paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
       }}

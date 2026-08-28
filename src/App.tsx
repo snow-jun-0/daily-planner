@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import YearView from "./views/YearView";
+import YearPickerView from "./views/YearPickerView";
 import MonthView from "./views/MonthView";
 import DayView from "./views/DayView";
 import StatsView from "./views/StatsView";
@@ -11,15 +12,15 @@ import TimerModal from "./views/TimerModal";
 import DDayModal from "./views/DDayModal";
 import MemoView from "./views/MemoView";
 import SettingsView from "./views/SettingsView";
-import BottomTabBar, { TabAction } from "./views/BottomTabBar";
+import BottomTabBar, { TabAction, TabKey } from "./views/BottomTabBar";
 import {
-  P, dateKey, loadDay, DDay, loadDDays, saveDDays, getDDayCount, isDDaySoon, DDAY_COLORS,
+  P, dateKey, loadDay, DDay, loadDDays, loadVisibleDDays, saveDDays, getDDayCount, isDDaySoon, DDAY_COLORS,
   getNotifyDaily, wasDailyReflectionFiredToday, markDailyReflectionFired,
 } from "./lib";
 import { hasGoogleConfig, isSignedIn, signInGoogle, signOutGoogle, hasExpiredToken, listDDayEvents, isAllDayEvent } from "./gcal";
 import { usePomodoro } from "./pomodoro";
 
-type View = "year" | "month" | "day" | "stats" | "memo" | "settings";
+type View = "year" | "yearpicker" | "month" | "day" | "stats" | "memo" | "settings";
 
 const DOW_EN = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
@@ -118,7 +119,8 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  const ddays = useMemo(() => loadDDays(), [ddaysVersion]);
+  // 요약카드에는 지난 D-Day는 숨기고(표시용 필터), 데이터 자체는 그대로 둔다.
+  const ddays = useMemo(() => loadVisibleDDays(), [ddaysVersion]);
   const visibleDDays = ddays.slice(0, 2);
   const moreDDaysCount = ddays.length - visibleDDays.length;
 
@@ -155,13 +157,13 @@ export default function App() {
   };
 
   // 하단 탭바 — 활성 탭 표시(showTimer가 열려있으면 그게 우선)
-  const activeTab: "month" | "memo" | "today" | "timer" | "settings" =
+  const activeTab: TabKey | null =
     showTimer ? "timer"
     : view === "day" ? "today"
-    : view === "month" || view === "year" ? "month"
+    : view === "month" || view === "year" || view === "yearpicker" ? "month"
     : view === "memo" ? "memo"
     : view === "settings" ? "settings"
-    : "today"; // stats 등 그 외의 경우 홈(오늘) 영역으로 취급
+    : null; // stats 등 매칭되는 탭이 없는 화면 → 어느 탭도 활성 아님
 
   const handleTabSelect = (action: TabAction) => {
     if (action === "timer") {
@@ -298,6 +300,13 @@ export default function App() {
             onSelectMonth={(m) => { setMonth(m); setView("month"); }}
           />
         )}
+        {view === "yearpicker" && (
+          <YearPickerView
+            year={year}
+            onSelectYear={(y) => { setYear(y); setView("month"); }}
+            onBack={() => setView("month")}
+          />
+        )}
         {view === "month" && (
           <MonthView
             year={year}
@@ -306,6 +315,7 @@ export default function App() {
             gSignedIn={gSignedIn}
             onGSignedInChange={setGSignedIn}
             onBackToYear={() => setView("year")}
+            onOpenYearPicker={() => setView("yearpicker")}
             onChangeMonth={(y, m) => { setYear(y); setMonth(m); }}
             onSelectDay={(d) => { setDay(d); setView("day"); }}
             onOpenStats={() => setView("stats")}

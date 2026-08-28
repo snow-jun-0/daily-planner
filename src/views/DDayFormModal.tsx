@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { P, DDay, DDAY_COLORS, uid, addDDay, setDDayGoogleEventId } from "../lib";
+import { P, DDay, DDAY_COLORS, DAY_NAMES, uid, addDDay, setDDayGoogleEventId } from "../lib";
 import { hasGoogleConfig, createDDayEvent } from "../gcal";
+import MiniCalendar from "./MiniCalendar";
 
 interface Props {
   gSignedIn: boolean;
@@ -14,6 +15,12 @@ export default function DDayFormModal({ gSignedIn, onGSignedInChange, onClose, o
   const [date, setDate] = useState("");
   const [color, setColor] = useState(DDAY_COLORS[0]);
   const [saving, setSaving] = useState(false);
+  const [showCal, setShowCal] = useState(false);
+
+  const fmtDate = (v: string) => {
+    const dt = new Date(`${v}T00:00:00`);
+    return `${dt.getFullYear()}년 ${dt.getMonth() + 1}월 ${dt.getDate()}일 (${DAY_NAMES[dt.getDay()]})`;
+  };
 
   const save = async () => {
     const trimmed = title.trim();
@@ -54,13 +61,28 @@ export default function DDayFormModal({ gSignedIn, onGSignedInChange, onClose, o
           className="w-full px-3 py-2.5 rounded-lg text-sm mb-3"
           style={{ background: P.paper, border: `1px solid ${P.line}` }}
         />
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="w-full px-3 py-2.5 rounded-lg text-sm mb-3"
-          style={{ background: P.paper, border: `1px solid ${P.line}` }}
-        />
+        <div className="relative mb-3">
+          <button
+            type="button"
+            onClick={() => setShowCal((v) => !v)}
+            className="w-full px-3 py-2.5 rounded-lg text-sm text-left"
+            style={{
+              background: P.paper,
+              border: `1px solid ${showCal ? P.green : P.line}`,
+              color: date ? P.ink : P.faint,
+            }}
+          >
+            {date ? fmtDate(date) : "날짜 선택"}
+          </button>
+          {showCal && (
+            <>
+              <div className="fixed inset-0 z-[65]" onClick={() => setShowCal(false)} />
+              <div className="absolute left-0 right-0 top-full mt-1 z-[66]">
+                <MiniCalendar value={date} onChange={(v) => { setDate(v); setShowCal(false); }} />
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="flex items-center gap-2 mb-5">
           <span className="text-xs" style={{ color: P.faint }}>색상</span>

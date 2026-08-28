@@ -40,7 +40,7 @@ const MIN_CELL_W = 30; // 분 셀 최소 너비(px) — 이보다 좁아지면(�
 const MIN_TIMETABLE_W = LABEL_W + MIN_CELL_W * 6;
 const ROW_PCT = 100 / HOURS.length; // 시간 격자에서 시(hour) 한 행이 차지하는 세로 비율(%)
 const GRID_ASPECT_ROWS = HOURS.length * 0.8; // 격자 전체 세로 길이를 살짝 압축해 빈 공간을 줄임
-const HOUR_LINE = "#2A332E"; // 시(hour) 구분용 진한 실선 색
+const HOUR_LINE = "var(--grid-line)"; // 시(hour) 구분용 진한 실선 색
 // 형광펜 블록의 셀 안쪽 여백(px) — 좌우는 시작/끝 시각 위치에 정확히 맞추고(0),
 // 위아래만 살짝 inset해 행 안에 여백을 준다
 const HL_INSET_Y = 4;
@@ -263,7 +263,7 @@ export default function DayView({
           <button onClick={() => move(-1)} className="text-xl sm:text-2xl px-2" style={{ color: P.faint }} aria-label="이전 날">‹</button>
           <h1 className="text-lg sm:text-2xl font-bold text-center" style={{ fontFamily: "'Gowun Batang', serif" }}>
             {month + 1}월 {day}일{" "}
-            <span style={{ color: dow === 0 ? P.red : dow === 6 ? "#2C5AA0" : P.green }}>
+            <span style={{ color: dow === 0 ? P.red : dow === 6 ? P.blue : P.green }}>
               {DAY_NAMES[dow]}
             </span>요일
             {isToday && (
@@ -418,7 +418,7 @@ export default function DayView({
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
                         style={{
                           ...segStyle(s, lane, count),
-                          background: `${b.color ?? P.green}22`,
+                          background: `color-mix(in srgb, ${b.color ?? P.green} 13%, transparent)`,
                           borderLeft: `2px dashed ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
@@ -444,7 +444,7 @@ export default function DayView({
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
                         style={{
                           ...segStyle(s, lane, count),
-                          background: `${b.color ?? P.sage}44`,
+                          background: `color-mix(in srgb, ${b.color ?? P.sage} 27%, transparent)`,
                           borderLeft: `3px solid ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>

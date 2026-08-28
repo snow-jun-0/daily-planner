@@ -100,7 +100,7 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
                 className="flex-1 py-2 rounded-lg text-xs font-medium transition-colors"
                 style={{
                   background: days.includes(d) ? P.green : "transparent",
-                  color: days.includes(d) ? "#fff" : (d === 0 ? P.red : d === 6 ? "#2C5AA0" : P.faint),
+                  color: days.includes(d) ? "#fff" : (d === 0 ? P.red : d === 6 ? P.blue : P.faint),
                   border: `1px solid ${days.includes(d) ? P.green : P.line}`,
                 }}
               >

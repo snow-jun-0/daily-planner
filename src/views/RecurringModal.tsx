@@ -1,17 +1,20 @@
 import { useState } from "react";
 import {
-  P, DAY_NAMES, RecurringBlock, uid, loadRecurring, saveRecurring,
+  P, DAY_NAMES, RecurringBlock, uid, loadRecurring, saveRecurring, setRecurringGoogleEventId,
   MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel,
 } from "../lib";
+import { hasGoogleConfig, createRecurringEvent, deleteEvent } from "../gcal";
 
 interface Props {
+  gSignedIn: boolean;
+  onGSignedInChange: (v: boolean) => void;
   onClose: () => void;
   onChanged: () => void;
 }
 
 const COLORS = ["#2F6B4F", "#2C5AA0", "#C0392B", "#B8860B", "#7D3C98", "#0E7490"];
 
-export default function RecurringModal({ onClose, onChanged }: Props) {
+export default function RecurringModal({ gSignedIn, onGSignedInChange, onClose, onChanged }: Props) {
   const [list, setList] = useState<RecurringBlock[]>(() => loadRecurring());
   const [title, setTitle] = useState("");
   const [days, setDays] = useState<number[]>([1]); // 기본 월요일
@@ -36,27 +39,47 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
     setEnd((prevEnd) => (prevEnd <= v ? v + 10 : prevEnd));
   };
 
-  const add = () => {
+  const add = async () => {
     if (!title.trim() || days.length === 0 || end <= start) return;
-    persist([
-      ...list,
-      {
-        id: uid(),
-        title: title.trim(),
-        days,
-        start,
-        end,
-        color,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-      },
-    ]);
+    const newBlock: RecurringBlock = {
+      id: uid(),
+      title: title.trim(),
+      days,
+      start,
+      end,
+      color,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    };
+    persist([...list, newBlock]);
     setTitle("");
     setStartDate("");
     setEndDate("");
+
+    if (hasGoogleConfig() && gSignedIn) {
+      try {
+        const ev = await createRecurringEvent(newBlock);
+        setRecurringGoogleEventId(newBlock.id, ev.id);
+        setList(loadRecurring());
+        onChanged();
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_SIGNED_IN") onGSignedInChange(false);
+        // 구글 등록에 실패해도 로컬에는 이미 저장됐으므로 조용히 넘어감
+      }
+    }
   };
 
-  const remove = (id: string) => persist(list.filter((r) => r.id !== id));
+  const remove = async (r: RecurringBlock) => {
+    persist(list.filter((x) => x.id !== r.id));
+    if (r.googleEventId && hasGoogleConfig() && gSignedIn) {
+      try {
+        await deleteEvent(r.googleEventId);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_SIGNED_IN") onGSignedInChange(false);
+        // 구글 쪽 삭제가 실패해도 로컬은 이미 지워졌으므로 조용히 넘어감
+      }
+    }
+  };
 
   const inputStyle = { background: P.paper, border: `1px solid ${P.line}` };
 
@@ -174,7 +197,7 @@ export default function RecurringModal({ onClose, onChanged }: Props) {
                     {formatRange(r) && ` · ${formatRange(r)}`}
                   </p>
                 </div>
-                <button onClick={() => remove(r.id)} className="text-sm px-2" style={{ color: P.faint }} aria-label="삭제">✕</button>
+                <button onClick={() => remove(r)} className="text-sm px-2" style={{ color: P.faint }} aria-label="삭제">✕</button>
               </li>
             ))}
           </ul>

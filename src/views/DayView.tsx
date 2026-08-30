@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Block, DayData, HOURS, P, PRIORITIES, Priority,
-  DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay,
+  DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay, loadRecurring,
   minutesToLabel,
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
   assignLanes, LaneAssignment,
@@ -9,11 +9,12 @@ import {
 } from "../lib";
 import {
   GEvent, hasGoogleConfig,
-  listEventsForDate, createEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent, eventUid,
+  listEventsForDate, createEvent, deleteEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent, eventUid,
 } from "../gcal";
 import GhostButton from "./GhostButton";
 import TimeBlockFormModal from "./TimeBlockFormModal";
 import TaskFormModal from "./TaskFormModal";
+import ConfirmModal from "./ConfirmModal";
 
 interface Props {
   year: number;
@@ -62,6 +63,7 @@ export default function DayView({
   const [gEvents, setGEvents] = useState<GEvent[]>([]);
   const [gBusy, setGBusy] = useState(false);
   const [gMsg, setGMsg] = useState("");
+  const [pendingGDelete, setPendingGDelete] = useState<GEvent | null>(null); // 구글 일정 삭제 확인 모달 대상
 
   // 날짜 바뀌면 다시 로드
   useEffect(() => setData(loadDay(key)), [key]);
@@ -126,13 +128,23 @@ export default function DayView({
       const existing = await listEventsForDate(key);
       let created = 0;
       let skipped = 0;
+      const idMap = new Map<string, string>(); // 블록 id → 구글 이벤트 id (삭제 시 대응 이벤트를 찾기 위해 로컬에 저장)
       for (const b of data.blocks) {
-        if (findEventByPlannerId(existing, b.id)) {
+        const already = findEventByPlannerId(existing, b.id);
+        if (already) {
+          idMap.set(b.id, already.id);
           skipped++;
           continue;
         }
-        await createEvent(key, b.title, b.start, b.end, b.id);
+        const ev = await createEvent(key, b.title, b.start, b.end, b.id);
+        idMap.set(b.id, ev.id);
         created++;
+      }
+      if (idMap.size > 0) {
+        setData((p) => ({
+          ...p,
+          blocks: p.blocks.map((b) => (idMap.has(b.id) ? { ...b, googleEventId: idMap.get(b.id) } : b)),
+        }));
       }
       const events = await listEventsForDate(key);
       setGEvents(events);
@@ -202,8 +214,39 @@ export default function DayView({
     const nb: Block = { id: uid(), title, start, end, color };
     setData((p) => ({ ...p, blocks: [...p.blocks, nb].sort((a, b) => a.start - b.start) }));
   };
-  const removeBlock = (id: string) =>
+  const removeBlock = async (id: string) => {
+    const target = data.blocks.find((b) => b.id === id);
     setData((p) => ({ ...p, blocks: p.blocks.filter((b) => b.id !== id) }));
+    if (target?.googleEventId && hasGoogleConfig() && gSignedIn) {
+      try {
+        await deleteEvent(target.googleEventId);
+      } catch (e) {
+        if (e instanceof Error && e.message === "NOT_SIGNED_IN") onGSignedInChange(false);
+        // 구글 쪽 삭제가 실패해도 로컬은 이미 지워졌으므로 조용히 넘어감
+      }
+    }
+  };
+
+  /** 시간표에 표시된 구글 일정을 직접 삭제 (앱이 만든 반복 일정 인스턴스는 이 버튼 자체가 안 뜸 — 반복 관리에서 삭제) */
+  const removeGoogleEvent = (ev: GEvent) => {
+    if (!hasGoogleConfig() || !gSignedIn) return;
+    setPendingGDelete(ev); // 실제 삭제는 앱 스타일 확인 모달에서 "삭제"를 눌렀을 때
+  };
+
+  const confirmRemoveGoogleEvent = async (ev: GEvent) => {
+    if (!hasGoogleConfig() || !gSignedIn) return;
+    try {
+      await deleteEvent(ev.id);
+      setGEvents((prev) => prev.filter((e) => e.id !== ev.id));
+    } catch (e) {
+      if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
+        onGSignedInChange(false);
+        setGMsg("다시 연결해줘");
+      } else {
+        setGMsg("구글 일정 삭제에 실패했어");
+      }
+    }
+  };
 
   // 오늘 해당하는 습관 (요일 매칭). habitTick(체크 시)·habitsVersion(습관 목록 변경 시)에 따라 다시 계산됨
   const todaysHabits = habitsForDate(key, dow);
@@ -227,10 +270,20 @@ export default function DayView({
   // (다른 기기/초기화된 기기에는 로컬 블록이 없으므로 그대로 표시)
   const relevantGEvents = gEvents.filter((ev) => {
     const priv = ev.extendedProperties?.private;
-    if (priv?.plannerSource !== "daily-planner") return true;
-    const plannerId = priv?.plannerId;
-    const hasLocalBlock = !!plannerId && data.blocks.some((b) => b.id === plannerId);
-    return !hasLocalBlock;
+    if (priv?.plannerSource === "daily-planner") {
+      const plannerId = priv?.plannerId;
+      const hasLocalBlock = !!plannerId && data.blocks.some((b) => b.id === plannerId);
+      return !hasLocalBlock;
+    }
+    if (priv?.plannerSource === "daily-planner-recurring") {
+      // 반복 일정은 singleEvents=true 조회 시 그날의 낱개 인스턴스로 펼쳐져 내려오는데,
+      // 로컬 recurringForDay가 이미 같은 일정을 표시하므로 여기서 또 표시하면 중복이 됨.
+      // 로컬에 대응하는 반복 일정이 남아있을 때만 숨기고(정상 케이스), 없으면(다른 기기 등) 그대로 보여준다.
+      const recurringId = priv?.plannerRecurringId;
+      const hasLocalRecurring = !!recurringId && loadRecurring().some((r) => r.id === recurringId);
+      return !hasLocalRecurring;
+    }
+    return true;
   });
   const allDayGEvents = relevantGEvents.filter(isAllDayEvent);
   console.log(`[DEBUG][DayView] key=${key} gEvents=${gEvents.length} relevant=${relevantGEvents.length} allDay=${allDayGEvents.length}`, {
@@ -413,7 +466,7 @@ export default function DayView({
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
-                        className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
+                        className="absolute px-1 group overflow-hidden"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
                         style={{
                           ...segStyle(s, lane, count),
@@ -421,12 +474,19 @@ export default function DayView({
                           borderLeft: `2px dashed ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
-                        {s === primary && (
-                          <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap`}
-                            style={{ color: b.color ?? P.green }}>
-                            ↻ {b.title}
-                          </span>
-                        )}
+                        <div className="flex justify-between items-center h-full gap-1">
+                          {s === primary && (
+                            <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap`}
+                              style={{ color: b.color ?? P.green }}>
+                              ↻ {b.title}
+                            </span>
+                          )}
+                          {s === primary && (
+                            <button onClick={() => onStartFocus(b.title)}
+                              className="text-[9px] px-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto"
+                              style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
+                          )}
+                        </div>
                       </div>
                     ));
                   })}
@@ -475,22 +535,40 @@ export default function DayView({
                     if (segs.length === 0) return null;
                     const { lane, count } = laneFor(`g:${eventUid(ev)}`);
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
+                    const title = ev.summary || "(제목 없음)";
+                    // 앱이 만든 반복 일정에서 펼쳐진 인스턴스는 개별 삭제 시 "이 날만/전체" 문제가 생기므로
+                    // 삭제 버튼을 달지 않는다 — 반복 일정은 "반복" 관리 모달에서 통째로 삭제하도록 안내
+                    const isRecurringInstance = ev.extendedProperties?.private?.plannerSource === "daily-planner-recurring";
                     return segs.map((s, si) => (
                       <div key={`${eventUid(ev)}-${si}`}
-                        className="absolute px-1 overflow-hidden pointer-events-none flex items-center"
-                        title={`${ev.summary || "(제목 없음)"} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
+                        className="absolute px-1 group overflow-hidden"
+                        title={`${title} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
                         style={{
                           ...segStyle(s, lane, count),
                           background: "#4285F41A",
                           borderLeft: "2px solid #4285F4",
                           borderRadius: 3,
                         }}>
-                        {s === primary && (
-                          <span className={`${count > 2 ? "text-[7px]" : "text-[8px]"} font-semibold whitespace-nowrap leading-none`}
-                            style={{ color: "#4285F4" }}>
-                            G {ev.summary || "(제목 없음)"}
-                          </span>
-                        )}
+                        <div className="flex justify-between items-center h-full gap-1">
+                          {s === primary && (
+                            <span className={`${count > 2 ? "text-[7px]" : "text-[8px]"} font-semibold whitespace-nowrap leading-none`}
+                              style={{ color: "#4285F4" }}>
+                              G {title}
+                            </span>
+                          )}
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
+                            {s === primary && (
+                              <button onClick={() => onStartFocus(title)}
+                                className="text-[9px] px-0.5"
+                                style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
+                            )}
+                            {s === primary && !isRecurringInstance && (
+                              <button onClick={() => removeGoogleEvent(ev)}
+                                className="text-[9px] px-0.5"
+                                style={{ color: P.faint }} aria-label="구글 일정 삭제" title="구글 캘린더에서 삭제">✕</button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     ));
                   })}
@@ -594,6 +672,17 @@ export default function DayView({
       )}
       {showTaskForm && (
         <TaskFormModal onClose={() => setShowTaskForm(false)} onAdd={addTask} />
+      )}
+      {pendingGDelete && (
+        <ConfirmModal
+          title="일정 삭제"
+          message="이 일정을 삭제하면 구글 캘린더에서도 삭제됩니다."
+          confirmLabel="삭제"
+          cancelLabel="취소"
+          danger
+          onConfirm={() => confirmRemoveGoogleEvent(pendingGDelete)}
+          onClose={() => setPendingGDelete(null)}
+        />
       )}
     </div>
   );

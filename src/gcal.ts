@@ -1,6 +1,8 @@
 // ---------- 구글 캘린더 연동 (GIS 토큰 방식, 프론트엔드 전용) ----------
 // 서버 함수 없이 브라우저에서 직접 Google Identity Services + Calendar REST API를 사용한다.
 
+import type { RecurringBlock } from "./lib";
+
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 // calendar.events만으로는 캘린더 목록(calendarList)을 읽을 수 없어, 공휴일/구독 캘린더 등
 // primary 이외의 캘린더까지 함께 조회하려면 calendarlist.readonly 스코프가 추가로 필요하다.
@@ -395,6 +397,57 @@ export async function listDDayEvents(): Promise<GEvent[]> {
   });
   const data = await apiFetch(`/calendars/primary/events?${params.toString()}`);
   return (data?.items ?? []) as GEvent[];
+}
+
+// ---------- 반복 일정 ↔ 구글 캘린더 RRULE 이벤트 연동 (단방향: 앱 → 구글) ----------
+const RECURRING_SOURCE = "daily-planner-recurring";
+
+/** RecurringBlock.days(0=일~6=토, lib.ts의 DAY_NAMES와 동일 순서)를 RRULE의 BYDAY 코드로 변환 */
+const BYDAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+function daysToByDay(days: number[]): string {
+  return [...days].sort().map((d) => BYDAY_CODES[d]).join(",");
+}
+
+function todayDateStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+}
+
+/**
+ * RRULE의 UNTIL은 DTSTART가 타임존이 있는 dateTime일 때 반드시 UTC(YYYYMMDDTHHMMSSZ) 형식이어야 한다.
+ * endDate 당일(로컬 기준)이 마지막 반복에 포함되도록 그 날의 23:59:59(로컬)를 UTC로 변환해서 사용한다.
+ */
+function untilFromDateStr(dateStr: string): string {
+  const d = new Date(`${dateStr}T23:59:59`);
+  return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * 반복 일정(RecurringBlock)을 구글 캘린더(primary)에 RRULE 기반 반복 이벤트로 생성.
+ * plannerRecurringId를 extendedProperties.private에 심어 앱이 만든 이벤트임을 식별.
+ */
+export async function createRecurringEvent(recurring: RecurringBlock): Promise<GEvent> {
+  const anchorDate = recurring.startDate || todayDateStr();
+  const rule = `FREQ=WEEKLY;BYDAY=${daysToByDay(recurring.days)}`;
+  const recurrence = [`RRULE:${rule}${recurring.endDate ? `;UNTIL=${untilFromDateStr(recurring.endDate)}` : ""}`];
+
+  const body = {
+    summary: recurring.title,
+    start: { dateTime: dateTimeFromMinutes(anchorDate, recurring.start), timeZone: tz() },
+    end: { dateTime: dateTimeFromMinutes(anchorDate, recurring.end), timeZone: tz() },
+    recurrence,
+    extendedProperties: {
+      private: { plannerRecurringId: recurring.id, plannerSource: RECURRING_SOURCE },
+    },
+  };
+  return apiFetch("/calendars/primary/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 /** 종일 일정인지 (start/end가 date만 있고 dateTime이 없음) */

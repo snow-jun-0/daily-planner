@@ -14,6 +14,7 @@ export interface Block {
   start: number; // 자정 기준 분 단위 (06:00~24:00 → 360~1440)
   end: number; // 자정 기준 분 단위
   color?: string;
+  googleEventId?: string; // "구글로 보내기"로 생성된 구글 이벤트와 연결된 경우 (삭제용)
 }
 
 /** 반복 일정: 특정 요일마다 반복되는 고정 일정 (예: 매주 월/수 09-11 수업) */
@@ -26,6 +27,7 @@ export interface RecurringBlock {
   color?: string;
   startDate?: string; // "YYYY-MM-DD", 이 날짜부터 표시 (없으면 제한 없음)
   endDate?: string; // "YYYY-MM-DD", 이 날짜까지 표시 (없으면 제한 없음)
+  googleEventId?: string; // 구글 캘린더 반복(RRULE) 이벤트와 연결된 경우 (삭제용)
 }
 
 export interface DayData {
@@ -268,6 +270,11 @@ export function loadRecurring(): RecurringBlock[] {
 
 export function saveRecurring(list: RecurringBlock[]) {
   localStorage.setItem(RECUR_KEY, JSON.stringify(list));
+}
+
+/** 구글 이벤트 생성 완료 후 googleEventId를 로컬 반복 일정에 채워 넣음 */
+export function setRecurringGoogleEventId(id: string, googleEventId: string) {
+  saveRecurring(loadRecurring().map((r) => (r.id === id ? { ...r, googleEventId } : r)));
 }
 
 /** 특정 요일/날짜에 해당하는 반복 일정을 Block 형태로 반환 (시간표에 얹기 위함) */

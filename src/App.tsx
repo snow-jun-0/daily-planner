@@ -265,6 +265,8 @@ export default function App() {
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
         {showRecurring && (
           <RecurringModal
+            gSignedIn={gSignedIn}
+            onGSignedInChange={setGSignedIn}
             onClose={() => setShowRecurring(false)}
             onChanged={() => setRecurringVersion((v) => v + 1)}
           />

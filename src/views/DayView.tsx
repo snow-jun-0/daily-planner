@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { TouchEvent as ReactTouchEvent } from "react";
 import {
   Block, DayData, Task, HOURS, P, PRIORITIES, Priority,
   DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay, loadRecurring,
@@ -386,32 +385,29 @@ export default function DayView({
   const laneFor = (key: string): LaneAssignment => laneMap.get(key) ?? { lane: 0, count: 1 };
 
   // ---------- 일정 블록 "탭" 감지 → 액션 시트 ----------
-  // 빈 칸 = 롱프레스+드래그로 새 일정 추가(위 gridRef useEffect). 일정 블록 = 짧은 탭으로 팝업.
-  // 블록 위에서 그냥 스와이프(스크롤)는 움직임이 크므로 탭으로 치지 않는다.
-  const tapRef = useRef({ x: 0, y: 0, t: 0, moved: false });
+  // 빈 칸 = 롱프레스+드래그로 새 일정 추가(아래 gridRef useEffect). 일정 블록 = 짧은 탭으로 팝업.
+  //
+  // 폰(터치)에서 왜 안 됐나:
+  //  - 블록은 격자(gridRef)의 자식 DOM이고, 격자에는 네이티브 touchstart/move/end 리스너가 붙어 있다.
+  //  - 블록에 붙였던 React onTouch* 는 브라우저가 그 터치를 "스크롤/팬 제스처 후보"로 보는 순간
+  //    touchcancel 로 바뀌거나 뒤따르는 click 이 취소돼서, 짧은 탭이 통째로 사라졌다
+  //    (페이지 세로 스크롤 + 시간표 가로 overflow 스크롤이 겹쳐 브라우저가 특히 공격적으로 판단).
+  //  - 데스크탑은 마우스라 제스처 판정이 없어 onClick 이 그대로 발동 → 됐던 것.
+  // 해결: 블록 탭도 격자의 네이티브 리스너에서 같이 처리한다. data-tapkey → 콜백 레지스트리에
+  //       등록해두고, 네이티브 touchend 에서 "블록 위에서 시작한 짧은 탭"이면 그 콜백을 부른다.
   const lastTapAt = useRef(0); // 터치 후 브라우저가 쏘는 유령 click 무시용
-  const makeTap = (fn: () => void) => ({
-    onTouchStart: (e: ReactTouchEvent) => {
-      const t = e.touches[0];
-      tapRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), moved: false };
-    },
-    onTouchMove: (e: ReactTouchEvent) => {
-      const t = e.touches[0];
-      const s = tapRef.current;
-      if (Math.abs(t.clientX - s.x) > 10 || Math.abs(t.clientY - s.y) > 10) s.moved = true;
-    },
-    onTouchEnd: () => {
-      const s = tapRef.current;
-      if (!s.moved && Date.now() - s.t < 500) {
-        lastTapAt.current = Date.now();
+  const tapHandlersRef = useRef(new Map<string, () => void>());
+  tapHandlersRef.current.clear(); // 렌더마다 최신 콜백으로 다시 채운다 (occupiedRef 와 같은 패턴)
+  const registerTap = (tapKey: string, fn: () => void) => {
+    tapHandlersRef.current.set(tapKey, fn);
+    return {
+      "data-tapkey": tapKey,
+      onClick: () => {
+        if (Date.now() - lastTapAt.current < 700) return; // 방금 터치 탭을 처리했으면 유령 클릭 무시
         fn();
-      }
-    },
-    onClick: () => {
-      if (Date.now() - lastTapAt.current < 700) return; // 방금 터치 탭을 처리했으면 유령 클릭 무시
-      fn();
-    },
-  });
+      },
+    };
+  };
 
   // ---------- 시간표 빈 영역을 꾹 눌러 드래그 → 시간대 선택 → 일정 추가 ----------
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -441,6 +437,8 @@ export default function DayView({
 
     // 진행 중인 드래그 상태 (터치). active=false 동안은 롱프레스 대기(움직이면 스크롤로 간주)
     let d: { anchor: number; active: boolean; timer: number; startX: number; startY: number } | null = null;
+    // 블록(일정) 위에서 시작한 터치 — 격자 드래그와 별개로, 짧게 떼면 그 블록의 탭 콜백 실행
+    let bt: { key: string; x: number; y: number; t: number } | null = null;
     const clearTimer = () => {
       if (d && d.timer) {
         window.clearTimeout(d.timer);
@@ -456,8 +454,16 @@ export default function DayView({
     };
 
     const onTouchStart = (e: TouchEvent) => {
-      if (d || e.touches.length !== 1) return;
+      if (e.touches.length !== 1) return;
       const t = e.touches[0];
+      // 1) 일정 블록 위에서 시작했나? → 탭 후보로 기록하고, 격자 드래그는 시작하지 않는다
+      const tapEl = (e.target as HTMLElement | null)?.closest?.("[data-tapkey]") as HTMLElement | null;
+      if (tapEl?.dataset.tapkey) {
+        bt = { key: tapEl.dataset.tapkey, x: t.clientX, y: t.clientY, t: Date.now() };
+        return;
+      }
+      // 2) 빈 영역 → 롱프레스 후 드래그로 새 일정 선택
+      if (d) return;
       const min = pointToMinutes(el, t.clientX, t.clientY);
       if (Number.isNaN(min) || occupiedRef.current(min)) return; // 빈 영역에서만 시작
       d = { anchor: min, active: false, timer: 0, startX: t.clientX, startY: t.clientY };
@@ -469,6 +475,12 @@ export default function DayView({
       }, 300);
     };
     const onTouchMove = (e: TouchEvent) => {
+      if (bt) {
+        // 10px 넘게 움직이면 스와이프(스크롤)로 간주 → 탭 취소. preventDefault 안 하므로 스크롤은 그대로 진행
+        const p = e.touches[0];
+        if (Math.abs(p.clientX - bt.x) > 10 || Math.abs(p.clientY - bt.y) > 10) bt = null;
+        return;
+      }
       if (!d) return;
       const t = e.touches[0];
       if (!d.active) {
@@ -508,16 +520,34 @@ export default function DayView({
       document.addEventListener("mouseup", mu);
     };
 
+    const onTouchEnd = (e: TouchEvent) => {
+      if (bt) {
+        const fn = tapHandlersRef.current.get(bt.key);
+        const quick = Date.now() - bt.t < 1000; // 1초 이내면 탭으로 인정 (약간 길게 눌러도 통과)
+        bt = null;
+        if (quick && fn) {
+          e.preventDefault(); // 뒤따르는 유령 click(모달 오버레이를 눌러 바로 닫아버림) 차단
+          lastTapAt.current = Date.now();
+          fn();
+        }
+      }
+      finish();
+    };
+    const onTouchCancel = () => {
+      bt = null;
+      finish();
+    };
+
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", finish);
-    el.addEventListener("touchcancel", finish);
+    el.addEventListener("touchend", onTouchEnd, { passive: false });
+    el.addEventListener("touchcancel", onTouchCancel);
     el.addEventListener("mousedown", onMouseDown);
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", finish);
-      el.removeEventListener("touchcancel", finish);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
       el.removeEventListener("mousedown", onMouseDown);
     };
   }, []);
@@ -702,9 +732,9 @@ export default function DayView({
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
-                        className="absolute px-1 overflow-hidden cursor-pointer"
+                        className="absolute px-1 overflow-hidden cursor-pointer select-none touch-manipulation"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
-                        {...makeTap(() => setTapAction({ kind: "recurring", title: b.title, start: b.start, end: b.end }))}
+                        {...registerTap(`rec:${b.id}`, () => setTapAction({ kind: "recurring", title: b.title, start: b.start, end: b.end }))}
                         style={{
                           ...segStyle(s, lane, count),
                           background: `color-mix(in srgb, ${b.color ?? P.green} 13%, transparent)`,
@@ -731,9 +761,9 @@ export default function DayView({
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
-                        className="absolute px-1 overflow-hidden cursor-pointer"
+                        className="absolute px-1 overflow-hidden cursor-pointer select-none touch-manipulation"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
-                        {...makeTap(() => setTapAction({ kind: "block", id: b.id, title: b.title, start: b.start, end: b.end }))}
+                        {...registerTap(`blk:${b.id}`, () => setTapAction({ kind: "block", id: b.id, title: b.title, start: b.start, end: b.end }))}
                         style={{
                           ...segStyle(s, lane, count),
                           background: `color-mix(in srgb, ${b.color ?? P.sage} 27%, transparent)`,
@@ -764,9 +794,9 @@ export default function DayView({
                     const isRecurringInstance = ev.extendedProperties?.private?.plannerSource === "daily-planner-recurring";
                     return segs.map((s, si) => (
                       <div key={`${eventUid(ev)}-${si}`}
-                        className="absolute px-1 overflow-hidden cursor-pointer"
+                        className="absolute px-1 overflow-hidden cursor-pointer select-none touch-manipulation"
                         title={`${title} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
-                        {...makeTap(() => setTapAction(
+                        {...registerTap(`g:${eventUid(ev)}`, () => setTapAction(
                           isRecurringInstance
                             ? { kind: "recurring", title, start: minutes.start, end: minutes.end }
                             : { kind: "google", ev, title, start: minutes.start, end: minutes.end }

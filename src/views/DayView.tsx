@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { TouchEvent as ReactTouchEvent } from "react";
 import {
   Block, DayData, Task, HOURS, P, PRIORITIES, Priority,
   DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay, loadRecurring,
@@ -17,6 +18,7 @@ import GhostButton from "./GhostButton";
 import TimeBlockFormModal from "./TimeBlockFormModal";
 import TaskFormModal from "./TaskFormModal";
 import ConfirmModal from "./ConfirmModal";
+import TimetableActionModal from "./TimetableActionModal";
 
 interface Props {
   year: number;
@@ -96,6 +98,14 @@ export default function DayView({
   const [gBusy, setGBusy] = useState(false);
   const [gMsg, setGMsg] = useState("");
   const [pendingGDelete, setPendingGDelete] = useState<GEvent | null>(null); // 구글 일정 삭제 확인 모달 대상
+
+  // 시간표 일정 블록을 탭하면 뜨는 액션 시트(타이머/삭제) 대상
+  const [tapAction, setTapAction] = useState<
+    | { kind: "block"; id: string; title: string; start: number; end: number }
+    | { kind: "google"; ev: GEvent; title: string; start: number; end: number }
+    | { kind: "recurring"; title: string; start: number; end: number }
+    | null
+  >(null);
 
   // 날짜 바뀌거나 구글 Tasks 역동기화가 스토어를 갱신하면 다시 로드
   useEffect(() => setData(loadDay(key)), [key, tasksVersion]);
@@ -374,6 +384,34 @@ export default function DayView({
     ...timedGEvents.map(({ ev, minutes }) => ({ key: `g:${eventUid(ev)}`, start: minutes.start, end: minutes.end })),
   ]);
   const laneFor = (key: string): LaneAssignment => laneMap.get(key) ?? { lane: 0, count: 1 };
+
+  // ---------- 일정 블록 "탭" 감지 → 액션 시트 ----------
+  // 빈 칸 = 롱프레스+드래그로 새 일정 추가(위 gridRef useEffect). 일정 블록 = 짧은 탭으로 팝업.
+  // 블록 위에서 그냥 스와이프(스크롤)는 움직임이 크므로 탭으로 치지 않는다.
+  const tapRef = useRef({ x: 0, y: 0, t: 0, moved: false });
+  const lastTapAt = useRef(0); // 터치 후 브라우저가 쏘는 유령 click 무시용
+  const makeTap = (fn: () => void) => ({
+    onTouchStart: (e: ReactTouchEvent) => {
+      const t = e.touches[0];
+      tapRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), moved: false };
+    },
+    onTouchMove: (e: ReactTouchEvent) => {
+      const t = e.touches[0];
+      const s = tapRef.current;
+      if (Math.abs(t.clientX - s.x) > 10 || Math.abs(t.clientY - s.y) > 10) s.moved = true;
+    },
+    onTouchEnd: () => {
+      const s = tapRef.current;
+      if (!s.moved && Date.now() - s.t < 500) {
+        lastTapAt.current = Date.now();
+        fn();
+      }
+    },
+    onClick: () => {
+      if (Date.now() - lastTapAt.current < 700) return; // 방금 터치 탭을 처리했으면 유령 클릭 무시
+      fn();
+    },
+  });
 
   // ---------- 시간표 빈 영역을 꾹 눌러 드래그 → 시간대 선택 → 일정 추가 ----------
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -664,25 +702,21 @@ export default function DayView({
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
-                        className="absolute px-1 group overflow-hidden"
+                        className="absolute px-1 overflow-hidden cursor-pointer"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
+                        {...makeTap(() => setTapAction({ kind: "recurring", title: b.title, start: b.start, end: b.end }))}
                         style={{
                           ...segStyle(s, lane, count),
                           background: `color-mix(in srgb, ${b.color ?? P.green} 13%, transparent)`,
                           borderLeft: `2px dashed ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
-                        <div className="flex justify-between items-center h-full gap-1">
+                        <div className="flex items-center h-full">
                           {s === primary && (
                             <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap`}
                               style={{ color: b.color ?? P.green }}>
                               ↻ {b.title}
                             </span>
-                          )}
-                          {s === primary && (
-                            <button onClick={() => onStartFocus(b.title, b.end - b.start)}
-                              className="text-[9px] px-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto"
-                              style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
                           )}
                         </div>
                       </div>
@@ -697,30 +731,21 @@ export default function DayView({
                     const primary = segs.reduce((a, s) => (s.widthPercent > a.widthPercent ? s : a), segs[0]);
                     return segs.map((s, si) => (
                       <div key={`${b.id}-${si}`}
-                        className="absolute px-1 group overflow-hidden"
+                        className="absolute px-1 overflow-hidden cursor-pointer"
                         title={`${b.title} · ${minutesToLabel(b.start)}–${minutesToLabel(b.end)}`}
+                        {...makeTap(() => setTapAction({ kind: "block", id: b.id, title: b.title, start: b.start, end: b.end }))}
                         style={{
                           ...segStyle(s, lane, count),
                           background: `color-mix(in srgb, ${b.color ?? P.sage} 27%, transparent)`,
                           borderLeft: `3px solid ${b.color ?? P.green}`,
                           borderRadius: 3,
                         }}>
-                        <div className="flex justify-between items-center h-full gap-1">
+                        <div className="flex items-center h-full">
                           {s === primary && (
                             <span className={`${count > 2 ? "text-[8px]" : "text-[9px]"} font-semibold whitespace-nowrap leading-none`}>
                               {b.title}
                             </span>
                           )}
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
-                            {s === primary && (
-                              <button onClick={() => onStartFocus(b.title, b.end - b.start)}
-                                className="text-[9px] px-0.5"
-                                style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
-                            )}
-                            <button onClick={() => removeBlock(b.id)}
-                              className="text-[9px] px-0.5"
-                              style={{ color: P.faint }} aria-label="일정 삭제">✕</button>
-                          </div>
                         </div>
                       </div>
                     ));
@@ -739,33 +764,26 @@ export default function DayView({
                     const isRecurringInstance = ev.extendedProperties?.private?.plannerSource === "daily-planner-recurring";
                     return segs.map((s, si) => (
                       <div key={`${eventUid(ev)}-${si}`}
-                        className="absolute px-1 group overflow-hidden"
+                        className="absolute px-1 overflow-hidden cursor-pointer"
                         title={`${title} · ${minutesToLabel(minutes.start)}–${minutesToLabel(minutes.end)}`}
+                        {...makeTap(() => setTapAction(
+                          isRecurringInstance
+                            ? { kind: "recurring", title, start: minutes.start, end: minutes.end }
+                            : { kind: "google", ev, title, start: minutes.start, end: minutes.end }
+                        ))}
                         style={{
                           ...segStyle(s, lane, count),
                           background: "#4285F41A",
                           borderLeft: "2px solid #4285F4",
                           borderRadius: 3,
                         }}>
-                        <div className="flex justify-between items-center h-full gap-1">
+                        <div className="flex items-center h-full">
                           {s === primary && (
                             <span className={`${count > 2 ? "text-[7px]" : "text-[8px]"} font-semibold whitespace-nowrap leading-none`}
                               style={{ color: "#4285F4" }}>
                               G {title}
                             </span>
                           )}
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
-                            {s === primary && (
-                              <button onClick={() => onStartFocus(title, minutes.end - minutes.start)}
-                                className="text-[9px] px-0.5"
-                                style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
-                            )}
-                            {s === primary && !isRecurringInstance && (
-                              <button onClick={() => removeGoogleEvent(ev)}
-                                className="text-[9px] px-0.5"
-                                style={{ color: P.faint }} aria-label="구글 일정 삭제" title="구글 캘린더에서 삭제">✕</button>
-                            )}
-                          </div>
                         </div>
                       </div>
                     ));
@@ -884,6 +902,20 @@ export default function DayView({
       )}
       {showTaskForm && (
         <TaskFormModal onClose={() => setShowTaskForm(false)} onAdd={addTask} />
+      )}
+      {tapAction && (
+        <TimetableActionModal
+          title={tapAction.title}
+          start={tapAction.start}
+          end={tapAction.end}
+          kind={tapAction.kind}
+          onStartFocus={() => onStartFocus(tapAction.title, tapAction.end - tapAction.start)}
+          onDelete={() => {
+            if (tapAction.kind === "block") void removeBlock(tapAction.id);
+            else if (tapAction.kind === "google") removeGoogleEvent(tapAction.ev);
+          }}
+          onClose={() => setTapAction(null)}
+        />
       )}
       {pendingGDelete && (
         <ConfirmModal

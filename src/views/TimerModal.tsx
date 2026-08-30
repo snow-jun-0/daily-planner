@@ -6,6 +6,8 @@ import GhostButton from "./GhostButton";
 interface Props {
   api: PomodoroApi;
   onClose: () => void;
+  /** 화면 잠금 상태를 상위(App)에 알림 — 잠금 중엔 하단 탭바 클릭도 막기 위함 */
+  onLockChange?: (locked: boolean) => void;
 }
 
 const SIZE = 240;
@@ -35,7 +37,7 @@ function ProgressRing({ progress, bodyColor }: { progress: number; bodyColor: st
   );
 }
 
-export default function TimerModal({ api, onClose }: Props) {
+export default function TimerModal({ api, onClose, onLockChange }: Props) {
   const {
     phase, status, label, remainingMs, durationMs, settings, todayCount, justCompleted, alarmActive, sessionNoBreak,
     start, pause, resume, reset, skip, silenceAlarm, confirm, updateSettings, clearJustCompleted,
@@ -72,6 +74,12 @@ export default function TimerModal({ api, onClose }: Props) {
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
   }, []);
 
+  // 잠금 상태를 상위에 전파. 모달이 닫히거나 언마운트되면 잠금도 해제된 것으로 알린다.
+  useEffect(() => {
+    onLockChange?.(locked);
+    return () => onLockChange?.(false);
+  }, [locked, onLockChange]);
+
   const progress = durationMs > 0 ? Math.min(1, Math.max(0, remainingMs / durationMs)) : 0;
   const ringColor = phase === "focus" ? P.green : P.sage;
 
@@ -91,6 +99,13 @@ export default function TimerModal({ api, onClose }: Props) {
   const setFocusMin = (v: number) => updateSettings({ ...settings, focusMin: Math.min(90, Math.max(1, v)) });
   const setBreakMin = (v: number) => updateSettings({ ...settings, breakMin: Math.min(60, Math.max(1, v)) });
 
+  // 화면 잠금 중에는 "길게 눌러 해제" 외의 모든 닫기 경로를 차단한다.
+  // (단, 완료 알림 "확인"(silenceAlarm)은 아래에서 항상 노출 — 알림은 끌 수 있어야 함)
+  const handleClose = () => {
+    if (locked) return;
+    onClose();
+  };
+
   const startUnlockHold = () => {
     setPressing(true);
     pressTimerRef.current = setTimeout(() => {
@@ -107,13 +122,15 @@ export default function TimerModal({ api, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#22302A88" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#22302A88" }} onClick={handleClose}>
       <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: P.card }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold" style={{ fontFamily: "'Gowun Batang', serif" }}>뽀모도로 타이머</h2>
           <div className="flex items-center gap-1">
             {!locked && <GhostButton icon="🔒" label="화면 잠금" onClick={() => setLocked(true)} title="컨트롤을 잠가서 실수로 안 눌리게 해" />}
-            <button onClick={onClose} className="text-lg px-2" style={{ color: P.faint }} aria-label="닫기">✕</button>
+            {!locked && (
+              <button onClick={handleClose} className="text-lg px-2" style={{ color: P.faint }} aria-label="닫기">✕</button>
+            )}
           </div>
         </div>
 
@@ -167,22 +184,6 @@ export default function TimerModal({ api, onClose }: Props) {
               확인
             </button>
           </div>
-        ) : awaitingChoice ? (
-          /* 2단계: 조용한 완료 — 다음 단계 큰 버튼 + 처음으로 */
-          <div className="mb-4">
-            <button
-              onClick={confirm}
-              className="w-full rounded-xl text-white font-bold"
-              style={{ background: noBreakDone ? P.green : nextColor, padding: "18px", fontSize: 17 }}
-            >
-              {noBreakDone ? "완료" : nextPhase === "focus" ? "집중 시작" : "휴식 시작"}
-            </button>
-            {!noBreakDone && (
-              <button onClick={reset} className="w-full mt-2 py-1 text-xs font-medium" style={{ color: P.faint }}>
-                처음으로
-              </button>
-            )}
-          </div>
         ) : locked ? (
           <div className="mb-4">
             <div className="relative overflow-hidden rounded-xl" style={{ background: P.paper }}>
@@ -206,6 +207,22 @@ export default function TimerModal({ api, onClose }: Props) {
                 🔒 길게 눌러 해제
               </button>
             </div>
+          </div>
+        ) : awaitingChoice ? (
+          /* 2단계: 조용한 완료 — 다음 단계 큰 버튼 + 처음으로 */
+          <div className="mb-4">
+            <button
+              onClick={confirm}
+              className="w-full rounded-xl text-white font-bold"
+              style={{ background: noBreakDone ? P.green : nextColor, padding: "18px", fontSize: 17 }}
+            >
+              {noBreakDone ? "완료" : nextPhase === "focus" ? "집중 시작" : "휴식 시작"}
+            </button>
+            {!noBreakDone && (
+              <button onClick={reset} className="w-full mt-2 py-1 text-xs font-medium" style={{ color: P.faint }}>
+                처음으로
+              </button>
+            )}
           </div>
         ) : (
           <>

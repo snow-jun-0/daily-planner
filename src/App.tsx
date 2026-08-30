@@ -33,6 +33,7 @@ export default function App() {
   const [showTodos, setShowTodos] = useState(false);
   const [showHabits, setShowHabits] = useState(false);
   const [showTimer, setShowTimer] = useState(false);
+  const [timerLocked, setTimerLocked] = useState(false); // 타이머 화면 잠금 — 켜져 있으면 하단 탭바도 막는다
   const [showDDays, setShowDDays] = useState(false);
   const [recurringVersion, setRecurringVersion] = useState(0);
   const [habitsVersion, setHabitsVersion] = useState(0);
@@ -190,6 +191,7 @@ export default function App() {
     : null; // stats 등 매칭되는 탭이 없는 화면 → 어느 탭도 활성 아님
 
   const handleTabSelect = (action: TabAction) => {
+    if (timerLocked) return; // 타이머 잠금 중엔 탭 전환 무시
     if (action === "timer") {
       setShowTimer(true);
       return;
@@ -310,7 +312,13 @@ export default function App() {
             onChanged={() => setHabitsVersion((v) => v + 1)}
           />
         )}
-        {showTimer && <TimerModal api={pomodoro} onClose={() => setShowTimer(false)} />}
+        {showTimer && (
+          <TimerModal
+            api={pomodoro}
+            onClose={() => { setShowTimer(false); setTimerLocked(false); }}
+            onLockChange={setTimerLocked}
+          />
+        )}
         {showDDays && (
           <DDayModal
             gSignedIn={gSignedIn}

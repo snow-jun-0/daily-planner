@@ -4,12 +4,16 @@ import { P, BLOCK_COLORS, MINUTE_OPTIONS, START_MINUTE_OPTIONS, minutesToLabel }
 interface Props {
   onClose: () => void;
   onAdd: (title: string, start: number, end: number, color: string) => void;
+  // 시간표에서 드래그로 시간대를 이미 정한 경우 — 시간 select 대신 읽기 전용 텍스트로 표시
+  fixedStart?: number;
+  fixedEnd?: number;
 }
 
-export default function TimeBlockFormModal({ onClose, onAdd }: Props) {
+export default function TimeBlockFormModal({ onClose, onAdd, fixedStart, fixedEnd }: Props) {
+  const fixed = fixedStart != null && fixedEnd != null;
   const [title, setTitle] = useState("");
-  const [start, setStart] = useState(540); // 09:00
-  const [end, setEnd] = useState(600); // 10:00
+  const [start, setStart] = useState(fixedStart ?? 540); // 09:00
+  const [end, setEnd] = useState(fixedEnd ?? 600); // 10:00
   const [color, setColor] = useState(BLOCK_COLORS[0].color);
 
   const endOptions = MINUTE_OPTIONS.filter((m) => m > start);
@@ -45,17 +49,26 @@ export default function TimeBlockFormModal({ onClose, onAdd }: Props) {
           autoFocus
         />
 
-        <div className="flex items-center gap-2 mb-3">
-          <select value={start} onChange={(e) => onStartChange(+e.target.value)}
-            className="flex-1 px-2 py-2 rounded-lg text-sm" style={{ background: P.paper, border: `1px solid ${P.line}` }}>
-            {START_MINUTE_OPTIONS.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
-          </select>
-          <span className="text-sm" style={{ color: P.faint }}>→</span>
-          <select value={end} onChange={(e) => setEnd(+e.target.value)}
-            className="flex-1 px-2 py-2 rounded-lg text-sm" style={{ background: P.paper, border: `1px solid ${P.line}` }}>
-            {endOptions.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
-          </select>
-        </div>
+        {fixed ? (
+          <div className="mb-3 px-3 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"
+            style={{ background: P.paper, border: `1px solid ${P.line}`, color: P.ink }}>
+            {minutesToLabel(start)}
+            <span style={{ color: P.faint }}>~</span>
+            {minutesToLabel(end)}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 mb-3">
+            <select value={start} onChange={(e) => onStartChange(+e.target.value)}
+              className="flex-1 px-2 py-2 rounded-lg text-sm" style={{ background: P.paper, border: `1px solid ${P.line}` }}>
+              {START_MINUTE_OPTIONS.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
+            </select>
+            <span className="text-sm" style={{ color: P.faint }}>→</span>
+            <select value={end} onChange={(e) => setEnd(+e.target.value)}
+              className="flex-1 px-2 py-2 rounded-lg text-sm" style={{ background: P.paper, border: `1px solid ${P.line}` }}>
+              {endOptions.map((m) => <option key={m} value={m}>{minutesToLabel(m)}</option>)}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 mb-5">
           <span className="text-xs" style={{ color: P.faint }}>색상</span>

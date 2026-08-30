@@ -352,6 +352,29 @@ export async function createEvent(
   });
 }
 
+/**
+ * 이미 연동된 시간표 블록(googleEventId 보유)이 수정됐을 때 대응 구글 이벤트를 갱신한다.
+ * events.patch로 제목·시간만 덮어쓰고 extendedProperties(plannerId 등)는 건드리지 않는다.
+ */
+export async function updateEvent(
+  eventId: string,
+  dateStr: string,
+  title: string,
+  start: number, // 분 단위 (자정 기준)
+  end: number // 분 단위 (자정 기준)
+): Promise<GEvent> {
+  const body = {
+    summary: title,
+    start: { dateTime: dateTimeFromMinutes(dateStr, start), timeZone: tz() },
+    end: { dateTime: dateTimeFromMinutes(dateStr, end), timeZone: tz() },
+  };
+  return apiFetch(`/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function deleteEvent(eventId: string): Promise<void> {
   await apiFetch(`/calendars/primary/events/${encodeURIComponent(eventId)}`, {
     method: "DELETE",

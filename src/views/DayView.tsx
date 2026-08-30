@@ -6,6 +6,7 @@ import {
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
   assignLanes, LaneAssignment,
   habitsForDate, isHabitDone, setHabitDone, getStreak,
+  getAutoSyncTimetable, setBlockGoogleEventId,
 } from "../lib";
 import {
   GEvent, hasGoogleConfig,
@@ -48,6 +49,35 @@ const HOUR_LINE = "var(--grid-line)"; // 시(hour) 구분용 진한 실선 색
 // 형광펜 블록의 셀 안쪽 여백(px) — 좌우는 시작/끝 시각 위치에 정확히 맞추고(0),
 // 위아래만 살짝 inset해 행 안에 여백을 준다
 const HL_INSET_Y = 4;
+
+/** 격자 영역 내 화면좌표(clientX/Y)를 자정 기준 분으로 변환.
+ *  세로 = 시(hour) 행(HOURS[0]=06시부터 HOURS.length행), 가로 = 그 시(hour) 내 0~60분.
+ *  격자 밖으로 나간 좌표는 가장자리로 clamp. 격자 크기를 못 재면 NaN. */
+function pointToMinutes(el: HTMLElement, cx: number, cy: number): number {
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return NaN;
+  const x = Math.min(Math.max(cx - r.left, 0), r.width);
+  const y = Math.min(Math.max(cy - r.top, 0), r.height);
+  let row = Math.floor((y / r.height) * HOURS.length);
+  row = Math.min(Math.max(row, 0), HOURS.length - 1);
+  const hour = HOURS[0] + row;
+  const minInHour = Math.min((x / r.width) * 60, 59.999);
+  return hour * 60 + minInHour;
+}
+
+/** 드래그 앵커~현재 지점의 두 분값을 10분 격자에 스냅해 [start,end)로 정규화.
+ *  최소 10분(칸 하나)을 보장하고 타임라인 범위(06:00~24:00)로 clamp. */
+function normalizeSel(a: number, b: number): { start: number; end: number } {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  let start = Math.floor(lo / 10) * 10;
+  let end = Math.ceil(hi / 10) * 10;
+  if (end - start < 10) end = start + 10;
+  if (start < TIMELINE_START_MIN) start = TIMELINE_START_MIN;
+  if (end > TIMELINE_END_MIN) end = TIMELINE_END_MIN;
+  if (end - start < 10) start = end - 10;
+  return { start, end };
+}
 
 export default function DayView({
   year, month, day, recurringVersion, habitsVersion, tasksVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay, onStartFocus,
@@ -132,9 +162,10 @@ export default function DayView({
       let skipped = 0;
       const idMap = new Map<string, string>(); // 블록 id → 구글 이벤트 id (삭제 시 대응 이벤트를 찾기 위해 로컬에 저장)
       for (const b of data.blocks) {
+        // 이미 googleEventId가 있거나(자동 동기화로 생성됨) plannerId로 구글에서 찾아지면 중복 생성하지 않는다
         const already = findEventByPlannerId(existing, b.id);
-        if (already) {
-          idMap.set(b.id, already.id);
+        if (b.googleEventId || already) {
+          idMap.set(b.id, b.googleEventId ?? already!.id);
           skipped++;
           continue;
         }
@@ -235,6 +266,24 @@ export default function DayView({
   const addBlock = (title: string, start: number, end: number, color: string) => {
     const nb: Block = { id: uid(), title, start, end, color };
     setData((p) => ({ ...p, blocks: [...p.blocks, nb].sort((a, b) => a.start - b.start) }));
+
+    // 자동 동기화 ON + 구글 로그인 시: 로컬 저장 직후 구글 캘린더에도 이벤트를 만들고
+    // 받은 id를 블록에 연결한다 (D-Day 자동 생성과 동일한 패턴).
+    if (getAutoSyncTimetable() && hasGoogleConfig() && gSignedIn) {
+      void (async () => {
+        try {
+          const ev = await createEvent(key, title, start, end, nb.id);
+          setBlockGoogleEventId(key, nb.id, ev.id);
+          setData((p) => ({
+            ...p,
+            blocks: p.blocks.map((b) => (b.id === nb.id ? { ...b, googleEventId: ev.id } : b)),
+          }));
+        } catch (e) {
+          if (e instanceof Error && e.message === "NOT_SIGNED_IN") onGSignedInChange(false);
+          // 자동 동기화 실패해도 로컬에는 이미 저장됨 — 조용히 넘어감
+        }
+      })();
+    }
   };
   const removeBlock = async (id: string) => {
     const target = data.blocks.find((b) => b.id === id);
@@ -326,6 +375,115 @@ export default function DayView({
   ]);
   const laneFor = (key: string): LaneAssignment => laneMap.get(key) ?? { lane: 0, count: 1 };
 
+  // ---------- 시간표 빈 영역을 꾹 눌러 드래그 → 시간대 선택 → 일정 추가 ----------
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [dragSel, setDragSel] = useState<{ start: number; end: number } | null>(null); // 드래그 중 미리보기(형광펜)
+  const [pendingSel, setPendingSel] = useState<{ start: number; end: number } | null>(null); // 손 뗀 뒤 모달에 넘길 확정 범위
+  const dragSelRef = useRef<{ start: number; end: number } | null>(null);
+  const setDrag = (v: { start: number; end: number } | null) => {
+    dragSelRef.current = v;
+    setDragSel(v);
+  };
+  const clearSelection = () => {
+    setDrag(null);
+    setPendingSel(null);
+  };
+
+  // 특정 분(min)이 이미 일정(앱 블록/반복/구글)에 점유돼 있는지 — 빈 영역에서만 드래그 시작을 허용하려고 사용.
+  // 렌더마다 최신 데이터로 갱신해 네이티브 리스너 안에서도 최신값을 참조한다.
+  const occupiedRef = useRef<(min: number) => boolean>(() => false);
+  occupiedRef.current = (min) =>
+    recurringList.some((b) => min >= b.start && min < b.end) ||
+    data.blocks.some((b) => min >= b.start && min < b.end) ||
+    timedGEvents.some(({ minutes }) => min >= minutes.start && min < minutes.end);
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+
+    // 진행 중인 드래그 상태 (터치). active=false 동안은 롱프레스 대기(움직이면 스크롤로 간주)
+    let d: { anchor: number; active: boolean; timer: number; startX: number; startY: number } | null = null;
+    const clearTimer = () => {
+      if (d && d.timer) {
+        window.clearTimeout(d.timer);
+        d.timer = 0;
+      }
+    };
+    const finish = () => {
+      if (!d) return;
+      clearTimer();
+      const wasActive = d.active;
+      d = null;
+      if (wasActive && dragSelRef.current) setPendingSel(dragSelRef.current);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (d || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const min = pointToMinutes(el, t.clientX, t.clientY);
+      if (Number.isNaN(min) || occupiedRef.current(min)) return; // 빈 영역에서만 시작
+      d = { anchor: min, active: false, timer: 0, startX: t.clientX, startY: t.clientY };
+      d.timer = window.setTimeout(() => {
+        if (!d) return;
+        d.active = true;
+        setDrag(normalizeSel(d.anchor, d.anchor));
+        navigator.vibrate?.(12);
+      }, 300);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!d) return;
+      const t = e.touches[0];
+      if (!d.active) {
+        // 롱프레스 완성 전에 움직이면 = 스크롤 의도 → 선택 취소하고 스크롤에 양보
+        if (Math.abs(t.clientX - d.startX) > 8 || Math.abs(t.clientY - d.startY) > 8) {
+          clearTimer();
+          d = null;
+        }
+        return;
+      }
+      e.preventDefault(); // 선택 중에는 페이지 스크롤 차단
+      const min = pointToMinutes(el, t.clientX, t.clientY);
+      if (!Number.isNaN(min)) setDrag(normalizeSel(d.anchor, min));
+    };
+
+    // 마우스(보조) — 롱프레스 없이 6px 이상 드래그하면 선택 시작
+    const onMouseDown = (e: MouseEvent) => {
+      if (d || e.button !== 0) return;
+      const min = pointToMinutes(el, e.clientX, e.clientY);
+      if (Number.isNaN(min) || occupiedRef.current(min)) return;
+      const anchor = min;
+      let engaged = false;
+      const mm = (ev: MouseEvent) => {
+        if (!engaged) {
+          if (Math.abs(ev.clientX - e.clientX) <= 6 && Math.abs(ev.clientY - e.clientY) <= 6) return;
+          engaged = true;
+        }
+        const m2 = pointToMinutes(el, ev.clientX, ev.clientY);
+        if (!Number.isNaN(m2)) setDrag(normalizeSel(anchor, m2));
+      };
+      const mu = () => {
+        document.removeEventListener("mousemove", mm);
+        document.removeEventListener("mouseup", mu);
+        if (engaged && dragSelRef.current) setPendingSel(dragSelRef.current);
+      };
+      document.addEventListener("mousemove", mm);
+      document.addEventListener("mouseup", mu);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", finish);
+    el.addEventListener("touchcancel", finish);
+    el.addEventListener("mousedown", onMouseDown);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", finish);
+      el.removeEventListener("touchcancel", finish);
+      el.removeEventListener("mousedown", onMouseDown);
+    };
+  }, []);
+
   return (
     <div>
       {/* 헤더 — 모바일에서는 back+진행률 한 줄, 날짜가 그 아래 전체 폭으로 쌓임 */}
@@ -405,7 +563,8 @@ export default function DayView({
             <div className="flex items-center gap-2 shrink-0">
               <GhostButton icon="+" label="추가" onClick={() => setShowBlockForm(true)} title="일정 추가" />
               <GhostButton icon="🔁" label="반복" onClick={onOpenRecurring} title="매주 반복되는 고정 일정 관리" />
-              {hasGoogleConfig() && gSignedIn && (
+              {/* 자동 동기화가 켜져 있으면 추가/삭제 시 이미 구글에 반영되므로 버튼 불필요 — OFF(수동 모드)일 때만 노출 */}
+              {hasGoogleConfig() && gSignedIn && !getAutoSyncTimetable() && (
                 <button onClick={exportDayToGoogle} disabled={gBusy}
                   className="text-xs px-2.5 py-1 rounded-lg font-medium text-white"
                   style={{ background: P.green }}>
@@ -464,7 +623,7 @@ export default function DayView({
                   ))}
                 </div>
 
-                <div className="relative flex-1" style={{ aspectRatio: `6 / ${GRID_ASPECT_ROWS}` }}>
+                <div ref={gridRef} className="relative flex-1" style={{ aspectRatio: `6 / ${GRID_ASPECT_ROWS}` }}>
                   {/* 시(hour) 구분 진한 실선 */}
                   {HOURS.map((h, i) =>
                     i === 0 ? null : (
@@ -478,6 +637,23 @@ export default function DayView({
                       <div key={m} className="absolute top-0 bottom-0"
                         style={{ left: `${(c / 6) * 100}%`, borderLeft: `1px dashed ${P.line}` }} />
                     )
+                  )}
+
+                  {/* 드래그로 선택 중인 시간대 (형광펜 미리보기) */}
+                  {dragSel && computeSegments(dragSel.start, dragSel.end).map((s, i) => (
+                    <div key={`sel-${i}`} className="absolute pointer-events-none"
+                      style={{
+                        ...segStyle(s),
+                        background: `color-mix(in srgb, ${P.sage} 45%, transparent)`,
+                        border: `1.5px solid ${P.green}`,
+                        borderRadius: 3,
+                      }} />
+                  ))}
+                  {dragSel && (
+                    <div className="absolute left-1 top-1 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded text-white pointer-events-none"
+                      style={{ background: P.green }}>
+                      {minutesToLabel(dragSel.start)} ~ {minutesToLabel(dragSel.end)}
+                    </div>
                   )}
 
                   {/* 반복 일정 (요일 기반, 읽기 전용) — 안 겹치면 행 전체, 겹치면 레인만큼 세로 분할 */}
@@ -697,6 +873,14 @@ export default function DayView({
 
       {showBlockForm && (
         <TimeBlockFormModal onClose={() => setShowBlockForm(false)} onAdd={addBlock} />
+      )}
+      {pendingSel && (
+        <TimeBlockFormModal
+          fixedStart={pendingSel.start}
+          fixedEnd={pendingSel.end}
+          onClose={clearSelection}
+          onAdd={addBlock}
+        />
       )}
       {showTaskForm && (
         <TaskFormModal onClose={() => setShowTaskForm(false)} onAdd={addTask} />

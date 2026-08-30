@@ -4,6 +4,7 @@ import {
   getNotifyMode, setNotifyMode as persistNotifyMode,
   getNotifyDaily, setNotifyDaily as persistNotifyDaily,
   getDarkMode, setDarkMode as persistDarkMode, applyDarkMode,
+  getAutoSyncTimetable, setAutoSyncTimetable as persistAutoSyncTimetable,
   resetAllData, TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToLabel,
 } from "../lib";
 import { hasGoogleConfig } from "../gcal";
@@ -55,6 +56,16 @@ function ClockRangeIcon() {
     <svg {...ICON_PROPS} stroke={P.green}>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+function SyncIcon() {
+  return (
+    <svg {...ICON_PROPS} stroke={P.green}>
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
     </svg>
   );
 }
@@ -193,6 +204,7 @@ export default function SettingsView({
   const [notifyMode, setNotifyModeState] = useState<NotifyMode>(() => getNotifyMode());
   const [notifyDaily, setNotifyDailyState] = useState<boolean>(() => getNotifyDaily());
   const [darkMode, setDarkModeState] = useState<boolean>(() => getDarkMode());
+  const [autoSyncTimetable, setAutoSyncTimetableState] = useState<boolean>(() => getAutoSyncTimetable());
   const notificationSupported = typeof Notification !== "undefined";
   const [permissionDenied, setPermissionDenied] = useState(
     () => notificationSupported && Notification.permission === "denied"
@@ -214,6 +226,11 @@ export default function SettingsView({
       await requestNotificationPermission();
       setPermissionDenied(Notification.permission === "denied");
     }
+  };
+
+  const changeAutoSyncTimetable = (v: boolean) => {
+    setAutoSyncTimetableState(v);
+    persistAutoSyncTimetable(v);
   };
 
   const changeDarkMode = (v: boolean) => {
@@ -240,7 +257,6 @@ export default function SettingsView({
           <GroupLabel>계정 연동</GroupLabel>
           <div className="card">
             <InfoRow
-              last
               icon={<GoogleIcon />}
               title="구글 캘린더"
               subtitle={gSignedIn ? undefined : gTokenExpired ? "연결이 만료됐어. 다시 연결해줘" : "일정을 구글 캘린더와 동기화해"}
@@ -264,6 +280,13 @@ export default function SettingsView({
                   )}
                 </div>
               }
+            />
+            <InfoRow
+              last
+              icon={<SyncIcon />}
+              title="시간표 자동 동기화"
+              subtitle="일정 추가·수정·삭제를 구글 캘린더에 자동 반영"
+              right={<Toggle checked={autoSyncTimetable} onChange={changeAutoSyncTimetable} label="시간표 자동 동기화" />}
             />
           </div>
         </section>

@@ -886,6 +886,33 @@ export function applyDarkMode(v: boolean) {
   document.documentElement.classList.toggle("dark", v);
 }
 
+// ---------- 시간표 자동 동기화 설정 ----------
+const AUTO_SYNC_TIMETABLE_KEY = "daily-planner-auto-sync-timetable";
+
+/**
+ * 시간표 일정을 추가/수정/삭제할 때 구글 캘린더에 자동 반영할지 여부.
+ * 기본값 ON (키가 없으면 true) — D-Day/할 일 자동 연동과 동일한 기본 동작.
+ * OFF면 "구글로 보내기" 버튼으로 수동 전송한다.
+ */
+export function getAutoSyncTimetable(): boolean {
+  return localStorage.getItem(AUTO_SYNC_TIMETABLE_KEY) !== "0";
+}
+
+export function setAutoSyncTimetable(v: boolean) {
+  localStorage.setItem(AUTO_SYNC_TIMETABLE_KEY, v ? "1" : "0");
+}
+
+/** 구글 이벤트 생성 완료 후 googleEventId를 로컬 시간표 블록에 채워 넣음 (setDDayGoogleEventId와 동일 패턴) */
+export function setBlockGoogleEventId(key: string, blockId: string, googleEventId: string) {
+  const store = loadStore();
+  const day = store[key];
+  if (!day) return;
+  const idx = day.blocks.findIndex((b) => b.id === blockId);
+  if (idx < 0) return; // 그 사이 삭제됨
+  day.blocks = day.blocks.map((b, i) => (i === idx ? { ...b, googleEventId } : b));
+  saveStore(store);
+}
+
 // ---------- 테마 ----------
 // 실제 색값은 index.css의 CSS 변수(:root / html.dark)에서 정의한다.
 // 여기서는 변수 참조만 노출해, 인라인 style로 색을 쓰는 곳도 다크 모드에서 함께 전환되게 한다.

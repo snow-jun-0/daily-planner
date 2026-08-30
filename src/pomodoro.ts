@@ -43,6 +43,9 @@ interface StoredState {
   // status==="awaiting"에서 사용자가 "확인"을 눌러 반복 알림을 끈 뒤의 "조용한 완료" 여부.
   // true면 알림은 멈췄지만 여전히 완료 대기 상태이고, "휴식 시작 / 처음으로" 선택을 기다린다.
   alarmSilenced?: boolean;
+  // 일정에서 연 타이머: 그 일정 길이만큼 집중(설정값 대신 사용). 휴식 없음.
+  customFocusMs?: number;
+  noBreak?: boolean; // true면 집중이 끝나도 휴식 단계로 넘어가지 않고 그냥 완료
 }
 
 const STATE_KEY = "daily-planner-pomodoro-state";
@@ -216,7 +219,11 @@ export interface PomodoroApi {
   justCompleted: PhaseTransition | null;
   /** awaiting 중 반복 알림이 아직 울리고 있는지 (false면 "확인"을 눌러 조용해진 상태) */
   alarmActive: boolean;
+  /** 현재 세션이 일정에서 연 "휴식 없는" 타이머인지 (UI 라벨/설정 패널 분기용) */
+  sessionNoBreak: boolean;
   start: (label?: string | null) => void;
+  /** 일정에서 ▶ 로 열기 — 일정 길이만큼 집중, 자동 시작 없이 대기 상태로 */
+  openForSchedule: (label: string, focusMin: number) => void;
   pause: () => void;
   resume: () => void;
   reset: () => void;
@@ -246,18 +253,31 @@ export function usePomodoro(): PomodoroApi {
   const durationFor = useCallback((phase: PomodoroPhase, s: PomodoroSettings) =>
     (phase === "focus" ? s.focusMin : s.breakMin) * 60_000, []);
 
+  /** 현재 상태 기준 집중 단계 길이 — 일정에서 연 타이머면 그 일정 길이(customFocusMs), 아니면 설정값 */
+  const focusDurationFor = useCallback((st: StoredState, s: PomodoroSettings) =>
+    st.customFocusMs && st.customFocusMs > 0 ? st.customFocusMs : s.focusMin * 60_000, []);
+
   /** 다음 단계로 실제 전환. countFocus면 방금 끝난 집중 세션을 오늘 카운트에 반영.
    *  부수효과(카운트)는 여기서 직접 처리 — setState 업데이트 함수 안에 넣으면 StrictMode가
    *  두 번 실행해 중복 카운트가 생길 수 있음 */
   const goToNextPhase = useCallback((countFocus: boolean) => {
     const prev = stateRef.current;
     const finishedPhase = prev.phase;
-    const nextPhase: PomodoroPhase = finishedPhase === "focus" ? "break" : "focus";
     if (countFocus && finishedPhase === "focus") setTodayCount(incrementTodayPomodoroCount());
-    const dur = durationFor(nextPhase, settingsRef.current);
     setJustCompleted(null);
+    // 휴식 없는 일정 타이머: 집중이 끝나면 억지 휴식 단계 없이 그냥 완료(대기) 상태로
+    if (finishedPhase === "focus" && prev.noBreak) {
+      setState({
+        phase: "focus", status: "idle", endTime: null,
+        remainingMs: focusDurationFor(prev, settingsRef.current), label: prev.label,
+        customFocusMs: prev.customFocusMs, noBreak: prev.noBreak,
+      });
+      return;
+    }
+    const nextPhase: PomodoroPhase = finishedPhase === "focus" ? "break" : "focus";
+    const dur = durationFor(nextPhase, settingsRef.current);
     setState({ phase: nextPhase, status: "running", endTime: Date.now() + dur, remainingMs: dur, label: prev.label });
-  }, [durationFor]);
+  }, [durationFor, focusDurationFor]);
 
   /** 시간이 0이 된 세션을 "완료 대기(awaiting)" 상태로 전환. 다음 단계로 자동 전환하지 않고 멈춘다.
    *  1회성 알림(시스템 알림/소리·진동 1회)만 여기서 처리하고, 확인 전까지 계속 울리는 반복 알림은
@@ -265,7 +285,9 @@ export function usePomodoro(): PomodoroApi {
   const enterAwaiting = useCallback(() => {
     const prev = stateRef.current;
     const finishedPhase = prev.phase;
-    const nextPhase: PomodoroPhase = finishedPhase === "focus" ? "break" : "focus";
+    // 휴식 없는 일정 타이머: 다음 단계를 "focus"로 둬서 UI가 억지 휴식 안내를 하지 않게 한다
+    const nextPhase: PomodoroPhase =
+      finishedPhase === "focus" ? (prev.noBreak ? "focus" : "break") : "focus";
     const transition: PhaseTransition = { phase: finishedPhase, next: nextPhase };
     setJustCompleted(transition);
     notifyPhaseEnd(transition);
@@ -309,10 +331,30 @@ export function usePomodoro(): PomodoroApi {
     : state.remainingMs;
 
   const start = useCallback((label?: string | null) => {
-    const dur = durationFor("focus", settingsRef.current);
     setJustCompleted(null);
-    setState({ phase: "focus", status: "running", endTime: Date.now() + dur, remainingMs: dur, label: label ?? null });
+    setState((prev) => {
+      // idle 상태에서 시작하면 일정 길이 세팅(customFocusMs/noBreak)을 이어받는다
+      const carry = prev.status === "idle";
+      const customFocusMs = carry ? prev.customFocusMs : undefined;
+      const noBreak = carry ? prev.noBreak : undefined;
+      const dur = customFocusMs && customFocusMs > 0 ? customFocusMs : durationFor("focus", settingsRef.current);
+      return {
+        phase: "focus", status: "running", endTime: Date.now() + dur, remainingMs: dur,
+        label: label ?? prev.label ?? null, customFocusMs, noBreak,
+      };
+    });
   }, [durationFor]);
+
+  /** 일정(앱 블록/구글/반복)에서 ▶ 로 연 타이머: 그 일정 길이만큼 집중 시간을 세팅하되
+   *  자동 시작하지 않고 "대기(idle)" 상태로 연다. 휴식 단계는 없음. */
+  const openForSchedule = useCallback((label: string, focusMin: number) => {
+    const dur = Math.max(1, Math.round(focusMin)) * 60_000;
+    setJustCompleted(null);
+    setState({
+      phase: "focus", status: "idle", endTime: null, remainingMs: dur,
+      label, customFocusMs: dur, noBreak: true,
+    });
+  }, []);
 
   const pause = useCallback(() => {
     setState((prev) => {
@@ -361,7 +403,8 @@ export function usePomodoro(): PomodoroApi {
   const updateSettings = useCallback((next: PomodoroSettings) => {
     setSettings(next);
     savePomodoroSettings(next);
-    setState((prev) => (prev.status === "idle" ? { ...prev, remainingMs: durationFor(prev.phase, next) } : prev));
+    setState((prev) =>
+      prev.status === "idle" && !prev.customFocusMs ? { ...prev, remainingMs: durationFor(prev.phase, next) } : prev);
   }, [durationFor]);
 
   const clearJustCompleted = useCallback(() => setJustCompleted(null), []);
@@ -371,12 +414,14 @@ export function usePomodoro(): PomodoroApi {
     status: state.status,
     label: state.label,
     remainingMs,
-    durationMs: durationFor(state.phase, settings),
+    durationMs: state.phase === "focus" ? focusDurationFor(state, settings) : durationFor(state.phase, settings),
     settings,
     todayCount,
     justCompleted,
     alarmActive: state.status === "awaiting" && !state.alarmSilenced,
+    sessionNoBreak: state.noBreak ?? false,
     start,
+    openForSchedule,
     pause,
     resume,
     reset,

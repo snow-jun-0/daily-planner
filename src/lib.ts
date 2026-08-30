@@ -6,6 +6,8 @@ export interface Task {
   text: string;
   done: boolean;
   priority: Priority;
+  googleTaskId?: string; // 연결된 구글 Tasks 항목 id (양방향 동기화 식별용)
+  googleTaskListId?: string; // 그 항목이 속한 task list id (완료/삭제 요청 라우팅용, 보통 "@default")
 }
 
 export interface Block {
@@ -242,6 +244,142 @@ export function markTaskDone(key: string, taskId: string) {
 export function setTaskDone(key: string, taskId: string, done: boolean) {
   const day = loadDay(key);
   saveDay(key, { ...day, tasks: day.tasks.map((t) => (t.id === taskId ? { ...t, done } : t)) });
+}
+
+// ---------- 구글 Tasks 양방향 동기화 (식별/편입 로직만 여기, 실제 API 호출은 gtasks.ts/taskSync.ts) ----------
+
+/** 로컬 dateKey("YYYY-MM-DD") → 구글 Tasks의 due(RFC3339, 날짜만 의미) */
+export function dueFromDateKey(key: string): string {
+  return `${key}T00:00:00.000Z`;
+}
+/** 구글 Tasks의 due → 로컬 dateKey. TodosModal이 쓰던 방식(앞 10글자)과 동일 */
+export function dateKeyFromDue(due: string): string {
+  return due.slice(0, 10);
+}
+
+/** 역동기화 입력: gtasks.listAllGTasks가 넘겨주는 구글 Task 스냅샷 */
+export interface GoogleTaskSnapshot {
+  id: string;
+  taskListId: string;
+  title: string;
+  status: "needsAction" | "completed";
+  due?: string;
+  deleted?: boolean;
+  notes?: string;
+}
+
+/** notes에 심어둔 [[planner:<localTaskId>]] 마커에서 로컬 id 추출 (링크 필드가 유실됐을 때 2차 매칭용) */
+function plannerMarkerId(notes?: string): string | null {
+  return notes?.match(/\[\[planner:([a-z0-9]+)\]\]/i)?.[1] ?? null;
+}
+
+/**
+ * 구글 Tasks 스냅샷을 로컬 스토어에 반영한다 (구글 → 앱, 로그인 시 역동기화).
+ * 규칙(단일 사용자 기준, 구글 상태를 done의 기준으로 삼음):
+ *  - 구글에서 삭제됨(목록에 없음/deleted): googleTaskId로 연결된 로컬 할 일 삭제
+ *  - 구글 완료 상태: 연결된 로컬 할 일의 done을 구글 기준으로 맞춤
+ *  - 구글 due 변경: 연결된 로컬 할 일을 새 날짜로 이동
+ *  - 구글에서 새로 만든 미완료 + due 있음 + 로컬에 없음: 해당 날짜에 로컬 할 일 생성(priority "mid")
+ *    (마커로 2차 매칭해 링크 유실 시 중복 생성 방지 / due 없는 항목은 편입하지 않음)
+ * 변경이 있었으면 true.
+ */
+export function reconcileGoogleTasks(snapshots: GoogleTaskSnapshot[]): boolean {
+  const store = loadStore();
+  let changed = false;
+
+  const activeById = new Map<string, GoogleTaskSnapshot>();
+  for (const g of snapshots) if (!g.deleted) activeById.set(g.id, g);
+
+  const matched = new Set<string>();
+  const moves: { task: Task; toKey: string }[] = [];
+
+  // ----- Pass 1: googleTaskId로 연결된 기존 로컬 할 일 갱신/삭제/이동 -----
+  for (const key of Object.keys(store)) {
+    const day = store[key];
+    const kept: Task[] = [];
+    for (const t of day.tasks) {
+      if (!t.googleTaskId) { kept.push(t); continue; }
+      const g = activeById.get(t.googleTaskId);
+      if (!g) { changed = true; continue; } // 구글에서 삭제됨 → 로컬도 제거
+      matched.add(g.id);
+      let nt = t;
+      // 리스트 id 정정 (@default 로 만든 뒤 실제 list id를 알게 된 경우)
+      if (g.taskListId && t.googleTaskListId !== g.taskListId) {
+        nt = { ...nt, googleTaskListId: g.taskListId };
+        changed = true;
+      }
+      const gDone = g.status === "completed";
+      if (gDone !== !!t.done) { nt = { ...nt, done: gDone }; changed = true; }
+      const gKey = g.due ? dateKeyFromDue(g.due) : null;
+      if (gKey && gKey !== key) { moves.push({ task: nt, toKey: gKey }); changed = true; continue; }
+      kept.push(nt);
+    }
+    day.tasks = kept;
+  }
+
+  for (const { task, toKey } of moves) {
+    const day = store[toKey] ?? { tasks: [], blocks: [], memo: "" };
+    day.tasks = [...day.tasks, task];
+    store[toKey] = day;
+  }
+
+  // ----- Pass 2: 아직 연결 안 된 구글 미완료 할 일(due 있음) → 로컬 생성 -----
+  for (const g of activeById.values()) {
+    if (matched.has(g.id)) continue;
+    if (g.status !== "needsAction") continue; // 완료된 히스토리는 편입하지 않음
+    if (!g.due) continue; // due 없는 항목은 편입 안 함 (TodosModal에서 표시만)
+    const gKey = dateKeyFromDue(g.due);
+
+    // 2차 매칭: 마커의 로컬 id를 가진, 아직 링크 안 된 로컬 할 일이 있으면 새로 만들지 말고 연결
+    const mId = plannerMarkerId(g.notes);
+    let linked = false;
+    if (mId) {
+      for (const key of Object.keys(store)) {
+        const idx = store[key].tasks.findIndex((t) => t.id === mId && !t.googleTaskId);
+        if (idx < 0) continue;
+        const t = store[key].tasks[idx];
+        store[key].tasks = store[key].tasks.map((x, i) =>
+          i === idx ? { ...t, googleTaskId: g.id, googleTaskListId: g.taskListId, done: false } : x);
+        changed = true;
+        linked = true;
+        break;
+      }
+    }
+    if (linked) continue;
+
+    const day = store[gKey] ?? { tasks: [], blocks: [], memo: "" };
+    day.tasks = [...day.tasks, {
+      id: uid(),
+      text: g.title || "(제목 없음)",
+      done: false,
+      priority: "mid" as Priority,
+      googleTaskId: g.id,
+      googleTaskListId: g.taskListId,
+    }];
+    store[gKey] = day;
+    changed = true;
+  }
+
+  if (changed) {
+    // 빈 날짜 정리 (saveDay와 동일 기준)
+    for (const k of Object.keys(store)) {
+      const d = store[k];
+      if (d.tasks.length === 0 && d.blocks.length === 0 && (!d.memo || d.memo.trim() === "")) delete store[k];
+    }
+    saveStore(store);
+  }
+  return changed;
+}
+
+/** 앱에서 만든 할 일에 구글 Task 링크를 채워 넣음 (pushTaskCreate 성공 후 호출) */
+export function linkTaskToGoogle(key: string, taskId: string, googleTaskId: string, googleTaskListId: string) {
+  const store = loadStore();
+  const day = store[key];
+  if (!day) return;
+  const idx = day.tasks.findIndex((t) => t.id === taskId);
+  if (idx < 0) return; // 그 사이 삭제됨
+  day.tasks = day.tasks.map((t, i) => (i === idx ? { ...t, googleTaskId, googleTaskListId } : t));
+  saveStore(store);
 }
 
 /** 메모가 있는 모든 날짜를 날짜 오름차순으로 반환 (메모 전체보기용) */

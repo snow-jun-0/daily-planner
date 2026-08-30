@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  Block, DayData, HOURS, P, PRIORITIES, Priority,
+  Block, DayData, Task, HOURS, P, PRIORITIES, Priority,
   DAY_NAMES, dateKey, loadDay, saveDay, uid, recurringForDay, loadRecurring,
   minutesToLabel,
   TIMELINE_START_MIN, TIMELINE_END_MIN, minutesToRow, minutesToRowOffsetPercent, splitIntoRowSegments,
@@ -11,6 +11,7 @@ import {
   GEvent, hasGoogleConfig,
   listEventsForDate, createEvent, deleteEvent, eventToMinutes, findEventByPlannerId, isAllDayEvent, eventUid,
 } from "../gcal";
+import { pushTaskCreate, pushTaskDone, pushTaskDelete } from "../taskSync";
 import GhostButton from "./GhostButton";
 import TimeBlockFormModal from "./TimeBlockFormModal";
 import TaskFormModal from "./TaskFormModal";
@@ -22,11 +23,12 @@ interface Props {
   day: number;
   recurringVersion: number; // 반복 일정 변경 시 리렌더 트리거
   habitsVersion: number; // 습관 목록 변경 시 리렌더 트리거
+  tasksVersion: number; // 구글 Tasks 역동기화로 로컬 할 일이 바뀌면 리렌더 트리거
   gSignedIn: boolean; // 구글 캘린더 연결 상태 (상단바와 공유)
   onGSignedInChange: (v: boolean) => void;
   onBack: () => void;
   onChangeDay: (y: number, m: number, d: number) => void;
-  onStartFocus: (title: string) => void;
+  onStartFocus: (title: string, durationMin?: number) => void;
   onTasksProgressChange?: (done: number, total: number) => void; // 상단 오늘 요약카드의 완료율 표시용
   onOpenRecurring: () => void; // 반복 일정 모달 열기
   onOpenTodos: () => void; // 전체 할 일 모달 열기
@@ -48,7 +50,7 @@ const HOUR_LINE = "var(--grid-line)"; // 시(hour) 구분용 진한 실선 색
 const HL_INSET_Y = 4;
 
 export default function DayView({
-  year, month, day, recurringVersion, habitsVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay, onStartFocus,
+  year, month, day, recurringVersion, habitsVersion, tasksVersion, gSignedIn, onGSignedInChange, onBack, onChangeDay, onStartFocus,
   onTasksProgressChange, onOpenRecurring, onOpenTodos,
 }: Props) {
   const key = dateKey(year, month, day);
@@ -65,8 +67,8 @@ export default function DayView({
   const [gMsg, setGMsg] = useState("");
   const [pendingGDelete, setPendingGDelete] = useState<GEvent | null>(null); // 구글 일정 삭제 확인 모달 대상
 
-  // 날짜 바뀌면 다시 로드
-  useEffect(() => setData(loadDay(key)), [key]);
+  // 날짜 바뀌거나 구글 Tasks 역동기화가 스토어를 갱신하면 다시 로드
+  useEffect(() => setData(loadDay(key)), [key, tasksVersion]);
 
   // 변경 시 자동 저장 (마운트 직후 제외)
   const mounted = useRef(false);
@@ -203,12 +205,32 @@ export default function DayView({
   const addTask = (text: string, priority: Priority) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    setData((p) => ({ ...p, tasks: [...p.tasks, { id: uid(), text: trimmed, done: false, priority }] }));
+    const nt: Task = { id: uid(), text: trimmed, done: false, priority };
+    setData((p) => ({ ...p, tasks: [...p.tasks, nt] }));
+    // 앱 → 구글: 생성 후 링크(googleTaskId)를 스토어에 저장하고, 같은 날짜를 보고 있으면 화면에도 반영
+    void pushTaskCreate(key, nt).then(() => {
+      const linked = loadDay(key).tasks.find((t) => t.id === nt.id);
+      if (linked?.googleTaskId) {
+        setData((p) => ({
+          ...p,
+          tasks: p.tasks.map((t) =>
+            t.id === nt.id
+              ? { ...t, googleTaskId: linked.googleTaskId, googleTaskListId: linked.googleTaskListId }
+              : t),
+        }));
+      }
+    });
   };
-  const toggleTask = (id: string) =>
+  const toggleTask = (id: string) => {
+    const target = data.tasks.find((t) => t.id === id);
     setData((p) => ({ ...p, tasks: p.tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) }));
-  const removeTask = (id: string) =>
+    if (target) void pushTaskDone(target, !target.done);
+  };
+  const removeTask = (id: string) => {
+    const target = data.tasks.find((t) => t.id === id);
     setData((p) => ({ ...p, tasks: p.tasks.filter((t) => t.id !== id) }));
+    if (target) void pushTaskDelete(target);
+  };
 
   const addBlock = (title: string, start: number, end: number, color: string) => {
     const nb: Block = { id: uid(), title, start, end, color };
@@ -482,7 +504,7 @@ export default function DayView({
                             </span>
                           )}
                           {s === primary && (
-                            <button onClick={() => onStartFocus(b.title)}
+                            <button onClick={() => onStartFocus(b.title, b.end - b.start)}
                               className="text-[9px] px-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto"
                               style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
                           )}
@@ -515,7 +537,7 @@ export default function DayView({
                           )}
                           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
                             {s === primary && (
-                              <button onClick={() => onStartFocus(b.title)}
+                              <button onClick={() => onStartFocus(b.title, b.end - b.start)}
                                 className="text-[9px] px-0.5"
                                 style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
                             )}
@@ -558,7 +580,7 @@ export default function DayView({
                           )}
                           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 ml-auto">
                             {s === primary && (
-                              <button onClick={() => onStartFocus(title)}
+                              <button onClick={() => onStartFocus(title, minutes.end - minutes.start)}
                                 className="text-[9px] px-0.5"
                                 style={{ color: P.green }} aria-label="집중 시작" title="이 일정으로 집중 타이머 시작">▶</button>
                             )}
@@ -633,6 +655,12 @@ export default function DayView({
                       style={{ color: t.done ? P.faint : P.ink }}>
                       {t.text}
                     </span>
+                    {t.googleTaskId && (
+                      <span className="text-[9px] w-4 h-4 rounded-full font-bold shrink-0 flex items-center justify-center text-white"
+                        style={{ background: "#4285F4" }} title="구글 할 일과 동기화됨">
+                        G
+                      </span>
+                    )}
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0"
                       style={{ background: p.bg, color: p.color }}>
                       {p.label}

@@ -15,6 +15,16 @@ export interface GTask {
   due?: string; // RFC3339 (날짜만 의미 있음, 시각은 00:00:00Z로 고정되어 옴)
 }
 
+/** 역동기화용 전체 스냅샷 (완료/삭제 상태 포함) */
+export interface GTaskFull extends GTask {
+  status: "needsAction" | "completed";
+  deleted?: boolean;
+  notes?: string;
+}
+
+/** 앱에서 만든 할 일은 항상 기본 목록에 생성한다 (앱에는 목록 개념이 없음) */
+export const DEFAULT_TASKLIST = "@default";
+
 interface GTaskList {
   id: string;
   title: string;
@@ -112,11 +122,81 @@ export async function listAllIncompleteGTasks(): Promise<GTask[]> {
   return merged;
 }
 
-/** 할 일을 완료 처리 (앱 → 구글, 양방향 동기화용) */
-export async function completeGTask(taskListId: string, taskId: string): Promise<void> {
+/** 할 일 완료/미완료 상태 설정 (앱 → 구글). 미완료로 되돌릴 땐 completed 날짜도 비워야 함 */
+export async function setGTaskStatus(taskListId: string, taskId: string, done: boolean): Promise<void> {
+  const body = done ? { status: "completed" } : { status: "needsAction", completed: null };
   await apiFetch(`/lists/${encodeURIComponent(taskListId)}/tasks/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status: "completed" }),
+    body: JSON.stringify(body),
   });
+}
+
+/** 할 일 생성 (앱 → 구글). notes에 [[planner:<localId>]] 마커를 넣어 링크 유실 시 2차 매칭에 대비 */
+export async function insertGTask(
+  taskListId: string,
+  fields: { title: string; due?: string; notes?: string }
+): Promise<GTask> {
+  const data = await apiFetch(`/lists/${encodeURIComponent(taskListId)}/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: fields.title, due: fields.due, notes: fields.notes }),
+  });
+  return {
+    id: data.id as string,
+    taskListId,
+    taskListTitle: "",
+    title: (data.title as string) || fields.title,
+    due: data.due as string | undefined,
+  };
+}
+
+/** 할 일 삭제 (앱 → 구글) */
+export async function deleteGTask(taskListId: string, taskId: string): Promise<void> {
+  await apiFetch(`/lists/${encodeURIComponent(taskListId)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** 한 목록의 모든 할 일(완료·숨김·삭제 포함) — 역동기화 전용 */
+async function listAllTasksForList(list: GTaskList): Promise<GTaskFull[]> {
+  const params = new URLSearchParams({
+    showCompleted: "true",
+    showHidden: "true",
+    showDeleted: "true",
+    maxResults: "100",
+  });
+  const data = await apiFetch(`/lists/${encodeURIComponent(list.id)}/tasks?${params.toString()}`);
+  const items = (data?.items ?? []) as any[];
+  return items.map((t) => ({
+    id: t.id as string,
+    taskListId: list.id,
+    taskListTitle: list.title,
+    title: (t.title as string) || "(제목 없음)",
+    due: t.due as string | undefined,
+    status: t.status === "completed" ? "completed" : "needsAction",
+    deleted: !!t.deleted,
+    notes: t.notes as string | undefined,
+  }));
+}
+
+/**
+ * 모든 목록의 할 일을 완료/삭제 상태까지 포함해 병합 반환 (역동기화용).
+ * listAllIncompleteGTasks(표시용)와 달리 필터 없이 전부 가져온다.
+ */
+export async function listAllGTasks(): Promise<GTaskFull[]> {
+  if (!hasTasksScope()) return [];
+  const lists = await listTaskLists();
+  const results = await Promise.all(
+    lists.map(async (l) => {
+      try {
+        return await listAllTasksForList(l);
+      } catch (e) {
+        if (e instanceof Error && (e.message === "NOT_SIGNED_IN" || e.message === "NO_TASKS_SCOPE")) throw e;
+        console.warn(`[gtasks] 리스트(${l.title}) 전체 할 일 조회 실패`, e);
+        return [] as GTaskFull[];
+      }
+    })
+  );
+  return results.flat();
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DAY_NAMES, MONTH_NAMES, P, daysWithData, dateKey, loadDay, allHabitsDoneForDate, minutesToLabel } from "../lib";
-import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent } from "../gcal";
+import { GEvent, hasGoogleConfig, listEventsForMonth, eventCoversDate, isAllDayEvent, eventToMinutes } from "../gcal";
 
 interface Props {
   year: number;
@@ -221,13 +221,18 @@ export default function MonthView({
                     <span className="truncate" style={{ color: P.ink }}>{b.title}</span>
                   </li>
                 ))}
-                {sGEvents.map((ev, i) => (
-                  <li key={`g-${i}`} className="flex items-center gap-2 text-sm">
-                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#4285F4" }} aria-hidden="true" />
-                    <span className="shrink-0 text-xs" style={{ color: P.faint }}>{isAllDayEvent(ev) ? "종일" : "구글"}</span>
-                    <span className="truncate" style={{ color: P.ink }}>{ev.summary || "(제목 없음)"}</span>
-                  </li>
-                ))}
+                {sGEvents.map((ev, i) => {
+                  const gm = isAllDayEvent(ev) ? null : eventToMinutes(ev);
+                  return (
+                    <li key={`g-${i}`} className="flex items-center gap-2 text-sm">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#4285F4" }} aria-hidden="true" />
+                      <span className="shrink-0 text-xs" style={{ color: P.faint }}>
+                        {isAllDayEvent(ev) ? "종일" : gm ? minutesToLabel(gm.start) : ""}
+                      </span>
+                      <span className="truncate" style={{ color: P.ink }}>{ev.summary || "(제목 없음)"}</span>
+                    </li>
+                  );
+                })}
                 {sTasks.map((t) => (
                   <li key={`t-${t.id}`} className="flex items-center gap-2 text-sm">
                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: P.highlight }} aria-hidden="true" />

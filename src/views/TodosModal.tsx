@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { P, PRIORITIES, MONTH_NAMES, DAY_NAMES, Priority, dateKey, allTasks, setTaskDone } from "../lib";
+import { P, PRIORITIES, MONTH_NAMES, DAY_NAMES, Priority, dateKey, allTasks, loadDay, setTaskDone } from "../lib";
 import { hasGoogleConfig, hasTasksScope } from "../gcal";
-import { GTask, gTaskUid, listAllIncompleteGTasks, completeGTask } from "../gtasks";
+import { GTask, gTaskUid, listAllIncompleteGTasks, setGTaskStatus } from "../gtasks";
+import { pushTaskDone } from "../taskSync";
 
 const GOOGLE_BLUE = "#4285F4";
 
@@ -14,18 +15,24 @@ const FILTERS: { id: FilterId; label: string }[] = [
 
 interface Props {
   gSignedIn: boolean;
+  tasksVersion: number;
   onGSignedInChange: (v: boolean) => void;
   onClose: () => void;
   onSelectDate: (y: number, m: number, d: number) => void;
 }
 
-export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSelectDate }: Props) {
+export default function TodosModal({ gSignedIn, tasksVersion, onGSignedInChange, onClose, onSelectDate }: Props) {
   const [filter, setFilter] = useState<FilterId>("todo");
   const [items, setItems] = useState(() => allTasks());
   const [gTasks, setGTasks] = useState<GTask[]>([]);
   const [gMsg, setGMsg] = useState("");
   const [gBusy, setGBusy] = useState<Set<string>>(new Set());
   const showGoogleHint = hasGoogleConfig() && gSignedIn && !hasTasksScope();
+
+  // 역동기화(tasksVersion 증가) 후 로컬 목록을 다시 읽어 반영
+  useEffect(() => {
+    setItems(allTasks());
+  }, [tasksVersion]);
 
   useEffect(() => {
     if (!hasGoogleConfig() || !gSignedIn) {
@@ -52,19 +59,21 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
     return () => {
       cancelled = true;
     };
-  }, [gSignedIn]);
+  }, [gSignedIn, tasksVersion]);
 
-  // 로컬 할 일 완료 토글 — 저장 후 목록을 다시 읽어 필터에 반영
+  // 로컬 할 일 완료 토글 — 저장 후 목록을 다시 읽어 필터에 반영. 구글과 연결된 항목이면 구글에도 반영
   const toggleLocal = (date: string, taskId: string, done: boolean) => {
+    const target = loadDay(date).tasks.find((t) => t.id === taskId);
     setTaskDone(date, taskId, !done);
     setItems(allTasks());
+    if (target?.googleTaskId) void pushTaskDone(target, !done);
   };
 
   const completeGoogle = async (task: GTask) => {
     const key = gTaskUid(task);
     setGBusy((p) => new Set(p).add(key));
     try {
-      await completeGTask(task.taskListId, task.id);
+      await setGTaskStatus(task.taskListId, task.id, true);
       setGTasks((p) => p.filter((t) => gTaskUid(t) !== key));
     } catch (e) {
       if (e instanceof Error && e.message === "NOT_SIGNED_IN") {
@@ -116,11 +125,12 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
   }
   const groupedDates = [...groups.keys()].sort();
 
-  // 구글 할 일은 우선순위 개념이 없으므로 "중요만" 필터에서는 숨김
+  // 마감일 있는 구글 할 일은 역동기화로 로컬(날짜 그룹)에 편입되므로 여기서는 마감일 없는 것만 보여준다(중복 방지).
+  // 구글 할 일은 우선순위 개념이 없으므로 "중요만" 필터에서는 숨김.
   const sortedGTasks =
     filter === "important"
       ? []
-      : [...gTasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
+      : [...gTasks].filter((t) => !t.due).sort((a, b) => a.title.localeCompare(b.title));
 
   const isEmpty = groupedDates.length === 0 && sortedGTasks.length === 0;
 
@@ -195,6 +205,12 @@ export default function TodosModal({ gSignedIn, onGSignedInChange, onClose, onSe
                           </p>
                           <p className="text-[10px]" style={{ color: P.faint }}>{formatDate(date)}</p>
                         </button>
+                        {task.googleTaskId && (
+                          <span className="text-[9px] w-4 h-4 rounded-full font-bold shrink-0 flex items-center justify-center text-white"
+                            style={{ background: GOOGLE_BLUE }} title="구글 할 일과 동기화됨">
+                            G
+                          </span>
+                        )}
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0"
                           style={{ background: p.bg, color: p.color }}>
                           {p.label}

@@ -37,13 +37,15 @@ function ProgressRing({ progress, bodyColor }: { progress: number; bodyColor: st
 
 export default function TimerModal({ api, onClose }: Props) {
   const {
-    phase, status, label, remainingMs, durationMs, settings, todayCount, justCompleted, alarmActive,
+    phase, status, label, remainingMs, durationMs, settings, todayCount, justCompleted, alarmActive, sessionNoBreak,
     start, pause, resume, reset, skip, silenceAlarm, confirm, updateSettings, clearJustCompleted,
   } = api;
 
   const awaiting = status === "awaiting";
   const alarmRinging = awaiting && alarmActive; // 1단계: 울리는 중, "확인"만 표시
   const awaitingChoice = awaiting && !alarmActive; // 2단계: 조용, "휴식 시작 / 처음으로"
+  // 휴식 없는 일정 타이머의 집중 완료 — 2단계에서 "완료"만 안내(억지 휴식 없음)
+  const noBreakDone = awaitingChoice && sessionNoBreak && (justCompleted?.phase ?? phase) === "focus";
 
   const [locked, setLocked] = useState(false);
   const [pressing, setPressing] = useState(false);
@@ -122,6 +124,8 @@ export default function TimerModal({ api, onClose }: Props) {
           >
             {alarmRinging
               ? (justCompleted.phase === "focus" ? "집중 시간이 끝났어요 — 확인을 눌러주세요" : "휴식이 끝났어요 — 확인을 눌러주세요")
+              : noBreakDone
+                ? "집중 시간이 끝났어요 🎉"
               : awaitingChoice
                 ? (nextPhase === "focus" ? "집중을 시작하거나 처음으로 돌아갈 수 있어요" : "휴식을 시작하거나 처음으로 돌아갈 수 있어요")
                 : (justCompleted.phase === "focus" ? "집중 끝! 잠깐 쉬어가자 🎉" : "휴식 끝! 다시 집중해볼까?")}
@@ -169,13 +173,15 @@ export default function TimerModal({ api, onClose }: Props) {
             <button
               onClick={confirm}
               className="w-full rounded-xl text-white font-bold"
-              style={{ background: nextColor, padding: "18px", fontSize: 17 }}
+              style={{ background: noBreakDone ? P.green : nextColor, padding: "18px", fontSize: 17 }}
             >
-              {nextPhase === "focus" ? "집중 시작" : "휴식 시작"}
+              {noBreakDone ? "완료" : nextPhase === "focus" ? "집중 시작" : "휴식 시작"}
             </button>
-            <button onClick={reset} className="w-full mt-2 py-1 text-xs font-medium" style={{ color: P.faint }}>
-              처음으로
-            </button>
+            {!noBreakDone && (
+              <button onClick={reset} className="w-full mt-2 py-1 text-xs font-medium" style={{ color: P.faint }}>
+                처음으로
+              </button>
+            )}
           </div>
         ) : locked ? (
           <div className="mb-4">
@@ -233,7 +239,9 @@ export default function TimerModal({ api, onClose }: Props) {
                 >
                   ⏭
                 </span>
-                <span className="text-[11px] font-medium" style={{ color: status === "idle" ? P.line : P.faint }}>휴식으로</span>
+                <span className="text-[11px] font-medium" style={{ color: status === "idle" ? P.line : P.faint }}>
+                  {sessionNoBreak ? "완료로" : "휴식으로"}
+                </span>
               </button>
             </div>
 
@@ -253,27 +261,33 @@ export default function TimerModal({ api, onClose }: Props) {
               <span className="text-xs font-medium" style={{ color: P.faint }}>{todayCount}회</span>
             </div>
 
-            {/* 시간 설정 */}
-            <div className="rounded-xl p-3 flex items-center justify-center gap-4" style={{ background: P.paper }}>
-              <label className="flex items-center gap-1.5 text-xs" style={{ color: P.faint }}>
-                집중
-                <input
-                  type="number" min={1} max={90} value={settings.focusMin} disabled={status !== "idle"}
-                  onChange={(e) => setFocusMin(+e.target.value)}
-                  className="w-12 px-1.5 py-1 rounded-md text-sm text-center"
-                  style={{ background: P.card, border: `1px solid ${P.line}`, opacity: status !== "idle" ? 0.5 : 1 }}
-                />분
-              </label>
-              <label className="flex items-center gap-1.5 text-xs" style={{ color: P.faint }}>
-                휴식
-                <input
-                  type="number" min={1} max={60} value={settings.breakMin} disabled={status !== "idle"}
-                  onChange={(e) => setBreakMin(+e.target.value)}
-                  className="w-12 px-1.5 py-1 rounded-md text-sm text-center"
-                  style={{ background: P.card, border: `1px solid ${P.line}`, opacity: status !== "idle" ? 0.5 : 1 }}
-                />분
-              </label>
-            </div>
+            {/* 시간 설정 — 일정에서 연 타이머(일정 길이 고정, 휴식 없음)에서는 감춘다 */}
+            {sessionNoBreak ? (
+              <div className="rounded-xl p-3 text-center text-xs" style={{ background: P.paper, color: P.faint }}>
+                일정 길이만큼 집중 · {Math.round(durationMs / 60_000)}분 (휴식 없음)
+              </div>
+            ) : (
+              <div className="rounded-xl p-3 flex items-center justify-center gap-4" style={{ background: P.paper }}>
+                <label className="flex items-center gap-1.5 text-xs" style={{ color: P.faint }}>
+                  집중
+                  <input
+                    type="number" min={1} max={90} value={settings.focusMin} disabled={status !== "idle"}
+                    onChange={(e) => setFocusMin(+e.target.value)}
+                    className="w-12 px-1.5 py-1 rounded-md text-sm text-center"
+                    style={{ background: P.card, border: `1px solid ${P.line}`, opacity: status !== "idle" ? 0.5 : 1 }}
+                  />분
+                </label>
+                <label className="flex items-center gap-1.5 text-xs" style={{ color: P.faint }}>
+                  휴식
+                  <input
+                    type="number" min={1} max={60} value={settings.breakMin} disabled={status !== "idle"}
+                    onChange={(e) => setBreakMin(+e.target.value)}
+                    className="w-12 px-1.5 py-1 rounded-md text-sm text-center"
+                    style={{ background: P.card, border: `1px solid ${P.line}`, opacity: status !== "idle" ? 0.5 : 1 }}
+                  />분
+                </label>
+              </div>
+            )}
           </>
         )}
       </div>

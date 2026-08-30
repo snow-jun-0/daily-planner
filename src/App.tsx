@@ -18,6 +18,7 @@ import {
   getNotifyDaily, wasDailyReflectionFiredToday, markDailyReflectionFired,
 } from "./lib";
 import { hasGoogleConfig, isSignedIn, signInGoogle, signOutGoogle, hasExpiredToken, listDDayEvents, isAllDayEvent } from "./gcal";
+import { runReverseSync } from "./taskSync";
 import { usePomodoro } from "./pomodoro";
 
 type View = "year" | "yearpicker" | "month" | "day" | "stats" | "memo" | "settings";
@@ -36,10 +37,14 @@ export default function App() {
   const [recurringVersion, setRecurringVersion] = useState(0);
   const [habitsVersion, setHabitsVersion] = useState(0);
   const [ddaysVersion, setDdaysVersion] = useState(0);
+  const [tasksVersion, setTasksVersion] = useState(0);
   const pomodoro = usePomodoro();
 
-  const startFocusFor = (title: string) => {
-    pomodoro.start(title);
+  // 일정에서 ▶ 로 열기: 그 일정 길이만큼 집중 시간을 세팅한 채 "대기" 상태로 열고,
+  // 자동 시작하지 않는다 (사용자가 타이머 화면의 "시작"을 눌러야 카운트다운 시작). 휴식 단계는 없음.
+  const startFocusFor = (title: string, durationMin?: number) => {
+    if (durationMin && durationMin > 0) pomodoro.openForSchedule(title, durationMin);
+    else pomodoro.start(title);
     setShowTimer(true);
   };
   const [year, setYear] = useState(today.getFullYear());
@@ -88,6 +93,25 @@ export default function App() {
         }
       } catch (e) {
         if (!cancelled && e instanceof Error && e.message === "NOT_SIGNED_IN") setGSignedIn(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gSignedIn]);
+
+  // 구글 Tasks → 로컬 할 일 역동기화 (D-Day 역동기화와 동일 구조).
+  // 구글에서 만든(due 있는) 할 일 편입, 구글 완료 상태 반영, 구글에서 삭제된 건 로컬도 삭제.
+  useEffect(() => {
+    if (!hasGoogleConfig() || !gSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const changed = await runReverseSync();
+        if (!cancelled && changed) setTasksVersion((v) => v + 1);
+      } catch (e) {
+        if (!cancelled && e instanceof Error && e.message === "NOT_SIGNED_IN") setGSignedIn(false);
+        // NO_TASKS_SCOPE 등은 조용히 무시 (기존 재연결 안내가 담당)
       }
     })();
     return () => {
@@ -274,6 +298,7 @@ export default function App() {
         {showTodos && (
           <TodosModal
             gSignedIn={gSignedIn}
+            tasksVersion={tasksVersion}
             onGSignedInChange={setGSignedIn}
             onClose={() => setShowTodos(false)}
             onSelectDate={gotoDate}
@@ -330,6 +355,7 @@ export default function App() {
             day={day}
             recurringVersion={recurringVersion}
             habitsVersion={habitsVersion}
+            tasksVersion={tasksVersion}
             gSignedIn={gSignedIn}
             onGSignedInChange={setGSignedIn}
             onBack={() => setView("month")}
